@@ -11,15 +11,4 @@ class ListProjectsUseCase:
         self._repository = repository
 
     def execute(self) -> List[ProjectResult]:
-        projects = self._repository.list_all()
-        return [
-            ProjectResult(
-                id=p.id,
-                name=p.name,
-                description=p.description,
-                created_at=p.created_at.isoformat(),
-                updated_at=p.updated_at.isoformat(),
-                channel_profile_id=p.channel_profile_id,
-            )
-            for p in projects
-        ]
+        return self._repository.list_all()

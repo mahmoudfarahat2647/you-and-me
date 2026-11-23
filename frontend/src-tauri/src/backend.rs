@@ -10,6 +10,16 @@ pub struct BackendProcessInfo {
     pub error: Option<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn startup_does_not_embed_a_developer_checkout_path() {
+        let source = include_str!("backend.rs");
+        let forbidden = ["D:", "\\you-and-me"].concat();
+        assert!(!source.contains(&forbidden), "startup embeds a developer checkout path");
+    }
+}
+
 pub struct BackendState {
     pub child: Mutex<Option<Child>>,
     pub port: u16,
@@ -26,34 +36,21 @@ impl BackendState {
     }
 
     pub fn find_python_path() -> Result<PathBuf, String> {
-        // 1. Check workspace .venv
-        let candidates = [
-            PathBuf::from(r"D:\you-and-me\.venv\Scripts\python.exe"),
-            PathBuf::from(r"..\.venv\Scripts\python.exe"),
-            PathBuf::from(r"..\..\.venv\Scripts\python.exe"),
-            PathBuf::from(r".venv\Scripts\python.exe"),
-        ];
-
-        for candidate in &candidates {
-            if candidate.exists() {
-                return Ok(candidate.clone());
-            }
+        let root = Self::find_development_root()?;
+        let python = root.join(".venv").join("Scripts").join("python.exe");
+        if python.is_file() {
+            Ok(python)
+        } else {
+            Err(format!("Python runtime not found at {}. Create the repository virtual environment and install the backend dependencies.", python.display()))
         }
+    }
 
-        // 2. Check if python is on PATH
-        if let Ok(output) = Command::new("where").arg("python.exe").output() {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if let Some(line) = stdout.lines().next() {
-                    let p = PathBuf::from(line.trim());
-                    if p.exists() {
-                        return Ok(p);
-                    }
-                }
-            }
-        }
-
-        Err("Python executable not found in .venv/Scripts/python.exe or PATH. Please ensure Python 3.12+ is installed.".to_string())
+    fn find_development_root() -> Result<PathBuf, String> {
+        Path::new(env!("CARGO_MANIFEST_DIR")).ancestors()
+            .find(|root| root.join("pyproject.toml").is_file()
+                && root.join("src/adapters/api/server.py").is_file())
+            .map(Path::to_path_buf)
+            .ok_or_else(|| "Backend development root not found. Run the desktop app from a complete source checkout; packaged backend runtime is not available.".to_string())
     }
 
     pub fn start(&self) -> Result<(), String> {
@@ -72,16 +69,7 @@ impl BackendState {
             }
         };
 
-        // Determine working directory (root of repository)
-        let working_dir = if Path::new(r"D:\you-and-me").exists() {
-            PathBuf::from(r"D:\you-and-me")
-        } else {
-            std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf()
-        };
+        let working_dir = Self::find_development_root()?;
 
         let mut cmd = Command::new(&python_path);
         cmd.args(["-m", "src.adapters.api.server", "--port", &self.port.to_string()])

@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, RefreshCw, Terminal, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from './ui/button';
 
 interface ActionableErrorProps {
@@ -13,15 +13,6 @@ export const ActionableError: React.FC<ActionableErrorProps> = ({
   onRetry,
   isRetrying,
 }) => {
-  const [copied, setCopied] = React.useState(false);
-  const commandToRun = 'd:\\you-and-me\\.venv\\Scripts\\python.exe -m src.adapters.api.server --port 8000';
-
-  const copyCommand = () => {
-    navigator.clipboard.writeText(commandToRun);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#191919]/90 backdrop-blur-sm p-6">
       <div className="w-full max-w-lg rounded-xl border border-[#383838] bg-[#202020] p-6 shadow-2xl">
@@ -48,29 +39,10 @@ export const ActionableError: React.FC<ActionableErrorProps> = ({
         <div className="mt-5 space-y-2 text-xs text-neutral-300">
           <p className="font-medium text-neutral-200">Actionable steps to resolve:</p>
           <ol className="list-decimal list-inside space-y-1 text-neutral-400 pl-1">
-            <li>Ensure the Python virtual environment exists at <code className="text-neutral-200 bg-[#282828] px-1 py-0.5 rounded">.venv</code>.</li>
-            <li>Verify port <code className="text-neutral-200 bg-[#282828] px-1 py-0.5 rounded">8000</code> is open and not blocked by a firewall or another service.</li>
-            <li>You can manually launch the backend using the command below:</li>
+            <li>Confirm the backend dependencies are installed for this application.</li>
+            <li>Make sure no firewall or security tool is blocking the local backend.</li>
+            <li>Use Retry Connection to restart the backend and check again.</li>
           </ol>
-
-          <div className="mt-2 flex items-center justify-between rounded border border-[#2e2e2e] bg-[#161616] px-3 py-2">
-            <div className="flex items-center gap-2 text-neutral-400 overflow-hidden text-ellipsis whitespace-nowrap">
-              <Terminal className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
-              <code className="text-[11px] text-neutral-300">{commandToRun}</code>
-            </div>
-            <button
-              onClick={copyCommand}
-              className="ml-2 shrink-0 text-[11px] font-medium text-neutral-400 hover:text-neutral-100 transition-colors"
-            >
-              {copied ? (
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <CheckCircle2 className="h-3 w-3" /> Copied
-                </span>
-              ) : (
-                'Copy'
-              )}
-            </button>
-          </div>
         </div>
 
         {/* Action Buttons */}

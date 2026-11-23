@@ -28,9 +28,7 @@ class CreateProjectUseCase:
             channel_profile_id=input_data.channel_profile_id,
         )
 
-        self._repository.save(project)
-
-        return ProjectResult(
+        result = ProjectResult(
             id=project.id,
             name=project.name,
             description=project.description,
@@ -38,3 +36,5 @@ class CreateProjectUseCase:
             updated_at=project.updated_at.isoformat(),
             channel_profile_id=project.channel_profile_id,
         )
+        self._repository.save(result)
+        return result

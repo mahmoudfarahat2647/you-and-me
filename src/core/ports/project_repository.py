@@ -1,24 +1,24 @@
 """Port interface for project persistence."""
 from abc import ABC, abstractmethod
 from typing import Optional, List
-from src.core.entities.project import Project
+from src.core.dto.project_dto import ProjectResult
 
 
 class ProjectRepository(ABC):
     """Abstract port for persisting and querying projects."""
 
     @abstractmethod
-    def save(self, project: Project) -> None:
-        """Persist a project entity."""
+    def save(self, project: ProjectResult) -> None:
+        """Persist a plain project record."""
         pass
 
     @abstractmethod
-    def get_by_id(self, project_id: str) -> Optional[Project]:
+    def get_by_id(self, project_id: str) -> Optional[ProjectResult]:
         """Retrieve a project by its identifier."""
         pass
 
     @abstractmethod
-    def list_all(self) -> List[Project]:
+    def list_all(self) -> List[ProjectResult]:
         """List all saved projects ordered by last updated descending."""
         pass
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import {
   FileText,
   X,
@@ -20,6 +20,11 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
   const [model, setModel] = useState('GPT-4o');
   const [scriptLength, setScriptLength] = useState('~ 8 minutes');
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const providerId = useId();
+  const modelId = useId();
+  const lengthId = useId();
+  const toneId = useId();
+  const temperatureId = useId();
 
   return (
     <aside className="w-72 shrink-0 border-l border-[#2e2e2e] bg-[#202020] flex flex-col justify-between select-none">
@@ -39,8 +44,9 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
           </div>
           {onClose && (
             <button
+              aria-label="Close inspector"
               onClick={onClose}
-              className="text-neutral-400 hover:text-neutral-200 transition-colors"
+              className="text-neutral-400 hover:text-neutral-200 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400"
             >
               <X className="h-4 w-4" />
             </button>
@@ -75,9 +81,9 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
           <div className="p-4 space-y-4">
             {/* Mode selection */}
             <div>
-              <label className="block text-[11px] font-medium text-neutral-400 mb-1.5">
+              <span className="block text-[11px] font-medium text-neutral-400 mb-1.5">
                 Mode
-              </label>
+              </span>
               <div className="grid grid-cols-3 gap-1 rounded-lg border border-[#2e2e2e] bg-[#191919] p-0.5">
                 <button
                   type="button"
@@ -120,11 +126,12 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
 
             {/* Provider */}
             <div>
-              <label className="block text-[11px] font-medium text-neutral-400 mb-1.5">
+              <label htmlFor={providerId} className="block text-[11px] font-medium text-neutral-400 mb-1.5">
                 Provider
               </label>
               <div className="relative">
                 <select
+                  id={providerId}
                   value={provider}
                   onChange={(e) => setProvider(e.target.value)}
                   className="w-full appearance-none rounded-lg border border-[#2e2e2e] bg-[#191919] px-3 py-2 text-xs text-neutral-100 focus:border-emerald-500/50 focus:outline-none transition-colors pr-8 cursor-pointer"
@@ -140,11 +147,12 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
 
             {/* Model */}
             <div>
-              <label className="block text-[11px] font-medium text-neutral-400 mb-1.5">
+              <label htmlFor={modelId} className="block text-[11px] font-medium text-neutral-400 mb-1.5">
                 Model
               </label>
               <div className="relative">
                 <select
+                  id={modelId}
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
                   className="w-full appearance-none rounded-lg border border-[#2e2e2e] bg-[#191919] px-3 py-2 text-xs text-neutral-100 focus:border-emerald-500/50 focus:outline-none transition-colors pr-8 cursor-pointer"
@@ -160,11 +168,12 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
 
             {/* Script Length */}
             <div>
-              <label className="block text-[11px] font-medium text-neutral-400 mb-1.5">
+              <label htmlFor={lengthId} className="block text-[11px] font-medium text-neutral-400 mb-1.5">
                 Script Length
               </label>
               <div className="relative">
                 <select
+                  id={lengthId}
                   value={scriptLength}
                   onChange={(e) => setScriptLength(e.target.value)}
                   className="w-full appearance-none rounded-lg border border-[#2e2e2e] bg-[#191919] px-3 py-2 text-xs text-neutral-100 focus:border-emerald-500/50 focus:outline-none transition-colors pr-8 cursor-pointer"
@@ -183,6 +192,7 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
             <div className="pt-2 border-t border-[#2e2e2e]">
               <button
                 type="button"
+                aria-expanded={advancedOpen}
                 onClick={() => setAdvancedOpen(!advancedOpen)}
                 className="w-full flex items-center justify-between text-[11px] font-medium text-neutral-400 hover:text-neutral-200 transition-colors py-1"
               >
@@ -197,16 +207,18 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
               {advancedOpen && (
                 <div className="mt-2 space-y-2 text-[11px] text-neutral-400 bg-[#191919] p-2.5 rounded-lg border border-[#2e2e2e]">
                   <div>
-                    <label className="block mb-1 text-neutral-500">Tone & Audience</label>
+                    <label htmlFor={toneId} className="block mb-1 text-neutral-500">Tone & Audience</label>
                     <input
+                      id={toneId}
                       type="text"
                       defaultValue="Educational Arabic with historical narrative"
                       className="w-full bg-[#202020] border border-[#2e2e2e] rounded px-2 py-1 text-xs text-neutral-200"
                     />
                   </div>
                   <div>
-                    <label className="block mb-1 text-neutral-500">Temperature</label>
+                    <label htmlFor={temperatureId} className="block mb-1 text-neutral-500">Temperature</label>
                     <input
+                      id={temperatureId}
                       type="range"
                       min="0"
                       max="1"
@@ -229,7 +241,7 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
 
         {activeTab === 'logs' && (
           <div className="p-4 text-xs font-mono text-neutral-400">
-            <p className="text-neutral-500">[00:00:00] Stage initialized in Auto mode.</p>
+            <p className="text-neutral-500">No logs available yet for this stage.</p>
           </div>
         )}
       </div>

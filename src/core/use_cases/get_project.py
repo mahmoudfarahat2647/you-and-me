@@ -10,21 +10,10 @@ class ProjectNotFoundError(Exception):
 
 
 class GetProjectUseCase:
-    """Retrieves a project entity and returns a plain result record."""
+    """Retrieves a plain project result record."""
 
     def __init__(self, repository: ProjectRepository) -> None:
         self._repository = repository
 
     def execute(self, input_data: GetProjectInput) -> Optional[ProjectResult]:
-        project = self._repository.get_by_id(input_data.id)
-        if project is None:
-            return None
-
-        return ProjectResult(
-            id=project.id,
-            name=project.name,
-            description=project.description,
-            created_at=project.created_at.isoformat(),
-            updated_at=project.updated_at.isoformat(),
-            channel_profile_id=project.channel_profile_id,
-        )
+        return self._repository.get_by_id(input_data.id)

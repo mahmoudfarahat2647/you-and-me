@@ -1,9 +1,8 @@
 """SQLite implementation of the ProjectRepository port."""
 import sqlite3
-from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Union
-from src.core.entities.project import Project
+from src.core.dto.project_dto import ProjectResult
 from src.core.ports.project_repository import ProjectRepository
 
 
@@ -39,7 +38,7 @@ class SQLiteProjectRepository(ProjectRepository):
             )
             conn.commit()
 
-    def save(self, project: Project) -> None:
+    def save(self, project: ProjectResult) -> None:
         with self._get_connection() as conn:
             conn.execute(
                 """
@@ -56,13 +55,13 @@ class SQLiteProjectRepository(ProjectRepository):
                     project.name,
                     project.description,
                     project.channel_profile_id,
-                    project.created_at.isoformat(),
-                    project.updated_at.isoformat(),
+                    project.created_at,
+                    project.updated_at,
                 ),
             )
             conn.commit()
 
-    def get_by_id(self, project_id: str) -> Optional[Project]:
+    def get_by_id(self, project_id: str) -> Optional[ProjectResult]:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "SELECT id, name, description, channel_profile_id, created_at, updated_at FROM projects WHERE id = ?",
@@ -73,7 +72,7 @@ class SQLiteProjectRepository(ProjectRepository):
                 return None
             return self._row_to_project(row)
 
-    def list_all(self) -> List[Project]:
+    def list_all(self) -> List[ProjectResult]:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "SELECT id, name, description, channel_profile_id, created_at, updated_at FROM projects ORDER BY updated_at DESC"
@@ -88,12 +87,12 @@ class SQLiteProjectRepository(ProjectRepository):
             return cursor.rowcount > 0
 
     @staticmethod
-    def _row_to_project(row: sqlite3.Row) -> Project:
-        return Project(
+    def _row_to_project(row: sqlite3.Row) -> ProjectResult:
+        return ProjectResult(
             id=row["id"],
             name=row["name"],
             description=row["description"],
             channel_profile_id=row["channel_profile_id"],
-            created_at=datetime.fromisoformat(row["created_at"]),
-            updated_at=datetime.fromisoformat(row["updated_at"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )

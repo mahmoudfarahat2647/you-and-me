@@ -38,11 +38,14 @@ export const ProjectListModal: React.FC<ProjectListModalProps> = ({
     p.id.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleCopyId = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(id);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 1500);
+  const handleCopyId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 1500);
+    } catch {
+      setCopiedId(null);
+    }
   };
 
   return (
@@ -80,6 +83,7 @@ export const ProjectListModal: React.FC<ProjectListModalProps> = ({
         <div className="relative">
           <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-neutral-500" />
           <Input
+            aria-label="Search projects"
             type="text"
             placeholder="Search projects by name, description or ID..."
             value={searchTerm}
@@ -111,38 +115,36 @@ export const ProjectListModal: React.FC<ProjectListModalProps> = ({
               return (
                 <div
                   key={p.id}
-                  onClick={() => {
-                    onSelectProject(p);
-                    onClose();
-                  }}
-                  className={`group relative flex items-center justify-between rounded-lg border p-3.5 transition-all cursor-pointer ${
+                  className={`group relative flex items-center justify-between rounded-lg border p-3.5 transition-all ${
                     isActive
                       ? 'border-emerald-500/40 bg-emerald-950/15'
                       : 'border-[#2e2e2e] bg-[#191919] hover:border-[#383838] hover:bg-[#222222]'
                   }`}
                 >
                   <div className="flex-1 min-w-0 pr-4">
-                    <div className="flex items-center gap-2">
+                    <button type="button" aria-label={`Open ${p.name}`} onClick={() => { onSelectProject(p); onClose(); }} className="flex w-full min-w-0 items-center gap-2 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400">
                       <span className="font-medium text-xs text-neutral-100 truncate">
                         {p.name}
                       </span>
                       {isActive && <Badge variant="default">Active</Badge>}
-                    </div>
+                    </button>
                     {p.description && (
                       <p className="mt-1 text-[11px] text-neutral-400 truncate">
                         {p.description}
                       </p>
                     )}
                     <div className="mt-2 flex items-center gap-4 text-[11px] text-neutral-500">
-                      <div
-                        onClick={(e) => handleCopyId(e, p.id)}
-                        className="flex items-center gap-1 hover:text-neutral-300 font-mono transition-colors"
+                      <button
+                        type="button"
+                        aria-label={`Copy ID for ${p.name}`}
+                        onClick={() => void handleCopyId(p.id)}
+                        className="flex items-center gap-1 rounded hover:text-neutral-300 font-mono transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400"
                         title="Click to copy full ID"
                       >
                         <Hash className="h-3 w-3" />
                         <span>{p.id.slice(0, 8)}...</span>
                         {copiedId === p.id && <Check className="h-3 w-3 text-emerald-400" />}
-                      </div>
+                      </button>
                       <div className="flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
                         <span>{new Date(p.created_at).toLocaleDateString()}</span>

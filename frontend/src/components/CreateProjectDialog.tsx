@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { FolderPlus, Loader2 } from 'lucide-react';
 import { createProject } from '../api/client';
 import type { Project } from '../types';
@@ -28,14 +28,19 @@ export const CreateProjectDialog: React.FC<CreateProjectDialogProps> = ({
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const nameId = useId();
+  const descriptionId = useId();
+  const submitting = useRef(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting.current) return;
     if (!name.trim()) {
       setError('Project name is required.');
       return;
     }
 
+    submitting.current = true;
     setIsSubmitting(true);
     setError(null);
 
@@ -48,9 +53,10 @@ export const CreateProjectDialog: React.FC<CreateProjectDialogProps> = ({
       setDescription('');
       onProjectCreated(newProject);
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to create project.');
+    } catch (err: unknown) {
+      setError(err instanceof Error && err.message ? err.message : 'Failed to create project.');
     } finally {
+      submitting.current = false;
       setIsSubmitting(false);
     }
   };
@@ -70,16 +76,17 @@ export const CreateProjectDialog: React.FC<CreateProjectDialogProps> = ({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <div className="rounded-md border border-red-900/50 bg-red-950/30 p-2.5 text-xs text-red-300">
+            <div role="alert" className="rounded-md border border-red-900/50 bg-red-950/30 p-2.5 text-xs text-red-300">
               {error}
             </div>
           )}
 
           <div>
-            <label className="block text-xs font-medium text-neutral-300 mb-1.5">
+            <label htmlFor={nameId} className="block text-xs font-medium text-neutral-300 mb-1.5">
               Project Name <span className="text-red-400">*</span>
             </label>
             <Input
+              id={nameId}
               type="text"
               autoFocus
               value={name}
@@ -89,10 +96,11 @@ export const CreateProjectDialog: React.FC<CreateProjectDialogProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-neutral-300 mb-1.5">
+            <label htmlFor={descriptionId} className="block text-xs font-medium text-neutral-300 mb-1.5">
               Description <span className="text-neutral-500">(Optional)</span>
             </label>
             <textarea
+              id={descriptionId}
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}

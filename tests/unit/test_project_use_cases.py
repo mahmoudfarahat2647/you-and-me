@@ -7,8 +7,8 @@ Verifies:
 """
 from typing import Dict, List, Optional
 import pytest
-from src.core.dto.project_dto import CreateProjectInput, GetProjectInput
-from src.core.entities.project import Project, ProjectValidationError
+from src.core.dto.project_dto import CreateProjectInput, GetProjectInput, ProjectResult
+from src.core.entities.project import ProjectValidationError
 from src.core.ports.project_repository import ProjectRepository
 from src.core.use_cases.create_project import CreateProjectUseCase
 from src.core.use_cases.get_project import GetProjectUseCase
@@ -19,15 +19,15 @@ class InMemoryProjectRepository(ProjectRepository):
     """In-memory test double for ProjectRepository with zero infrastructure dependencies."""
 
     def __init__(self) -> None:
-        self._projects: Dict[str, Project] = {}
+        self._projects: Dict[str, ProjectResult] = {}
 
-    def save(self, project: Project) -> None:
+    def save(self, project: ProjectResult) -> None:
         self._projects[project.id] = project
 
-    def get_by_id(self, project_id: str) -> Optional[Project]:
+    def get_by_id(self, project_id: str) -> Optional[ProjectResult]:
         return self._projects.get(project_id)
 
-    def list_all(self) -> List[Project]:
+    def list_all(self) -> List[ProjectResult]:
         # Return sorted by updated_at descending
         return sorted(self._projects.values(), key=lambda p: p.updated_at, reverse=True)
 

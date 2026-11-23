@@ -8,7 +8,6 @@ import {
   Image as ImageIcon,
   Film,
   Upload,
-  CheckCircle2,
   MousePointer,
   Hand,
   Maximize2,
@@ -35,12 +34,12 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   const [zoom, setZoom] = useState(100);
 
   const stages = [
-    { id: 'idea', label: 'Idea', icon: Lightbulb, status: 'completed' },
-    { id: 'script', label: 'Script', icon: FileText, status: 'in_progress' },
-    { id: 'voice', label: 'Voice', icon: Mic, status: 'pending' },
-    { id: 'scenes', label: 'Scenes', icon: ImageIcon, status: 'pending' },
-    { id: 'edit', label: 'Edit', icon: Film, status: 'pending' },
-    { id: 'export', label: 'Export', icon: Upload, status: 'pending' },
+    { id: 'idea', label: 'Idea', icon: Lightbulb },
+    { id: 'script', label: 'Script', icon: FileText },
+    { id: 'voice', label: 'Voice', icon: Mic },
+    { id: 'scenes', label: 'Scenes', icon: ImageIcon },
+    { id: 'edit', label: 'Edit', icon: Film },
+    { id: 'export', label: 'Export', icon: Upload },
   ];
 
   return (
@@ -61,11 +60,11 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
         {/* Project Title and Run Button */}
         <div className="mt-2 flex items-center justify-between pb-3">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <h1 className="text-base font-bold text-neutral-100 truncate">
               {project.name}
             </h1>
-            <Button variant="ghost" size="icon" className="text-neutral-400">
+            <Button aria-label="Project options" variant="ghost" size="icon" className="text-neutral-400 shrink-0">
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </div>
@@ -102,6 +101,7 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
       {/* Main Canvas View */}
       <div className="flex-1 relative overflow-hidden canvas-dots flex items-center justify-center p-8">
+        <p className="absolute top-3 left-4 text-xs text-neutral-400">No workflow progress available yet.</p>
         {/* Connected Stages */}
         <div className="flex items-center gap-3 max-w-full overflow-x-auto p-4">
           {stages.map((stage, idx) => {
@@ -111,33 +111,23 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             return (
               <React.Fragment key={stage.id}>
                 {/* Stage Node Box */}
-                <div
+                <button
+                  type="button"
+                  aria-pressed={isSelected}
                   onClick={() => onSelectStage(stage.id)}
-                  className={`relative flex flex-col items-center justify-center w-20 h-24 rounded-xl border transition-all cursor-pointer ${
+                  className={`relative flex shrink-0 flex-col items-center justify-center w-20 h-24 rounded-xl border transition-all cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400 ${
                     isSelected
                       ? 'border-emerald-500/80 bg-[#202020] shadow-[0_0_15px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/50'
                       : 'border-[#2e2e2e] bg-[#202020] hover:border-[#3a3a3a] hover:bg-[#242424]'
                   }`}
                 >
-                  {/* Status Badge */}
-                  {stage.status === 'completed' && (
-                    <div className="absolute top-1.5 right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
-                      <CheckCircle2 className="h-3 w-3" />
-                    </div>
-                  )}
-                  {stage.status === 'in_progress' && (
-                    <div className="absolute top-1.5 right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
-                      <Play className="h-2.5 w-2.5 fill-emerald-400" />
-                    </div>
-                  )}
-
                   <div className={`mt-1 p-2 rounded-lg ${isSelected ? 'text-emerald-400' : 'text-neutral-300'}`}>
                     <Icon className="h-6 w-6 stroke-[1.75]" />
                   </div>
                   <span className="mt-1 text-xs font-medium text-neutral-200">
                     {stage.label}
                   </span>
-                </div>
+                </button>
 
                 {/* Connecting arrow */}
                 {idx < stages.length - 1 && (
@@ -153,18 +143,19 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         </div>
 
         {/* Floating Bottom Canvas Toolbar */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-xl border border-[#2e2e2e] bg-[#202020]/95 px-2 py-1.5 shadow-xl backdrop-blur-xs text-neutral-400">
-          <Button variant="ghost" size="icon" className="h-6 w-6">
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-xl border border-[#2e2e2e] bg-[#202020] px-2 py-1.5 shadow-xl text-neutral-400">
+          <Button aria-label="Select" variant="ghost" size="icon" className="h-6 w-6">
             <MousePointer className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6">
+          <Button aria-label="Pan" variant="ghost" size="icon" className="h-6 w-6">
             <Hand className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6">
+          <Button aria-label="Fit view" variant="ghost" size="icon" className="h-6 w-6">
             <Maximize2 className="h-3.5 w-3.5" />
           </Button>
           <div className="h-4 w-[1px] bg-[#2e2e2e] mx-1" />
           <Button
+            aria-label="Zoom out"
             variant="ghost"
             size="icon"
             className="h-6 w-6"
@@ -176,6 +167,7 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             {zoom}%
           </span>
           <Button
+            aria-label="Zoom in"
             variant="ghost"
             size="icon"
             className="h-6 w-6"

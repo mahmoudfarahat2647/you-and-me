@@ -46,21 +46,37 @@ export async function restartTauriBackend(): Promise<BackendProcessInfo | null> 
 }
 
 export async function checkBackendHealth(): Promise<BackendHealth> {
-  try {
-    const res = await fetch(`${API_BASE_URL}/health`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) {
-      throw new ApiError(`Backend responded with status ${res.status}: ${res.statusText}`, res.status);
+  const deadline = Date.now() + 10_000;
+  while (true) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new ApiError('Timed out waiting for the local backend to start. Check the backend logs and retry.');
+    try {
+      const res = await fetch(`${API_BASE_URL}/health`, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(Math.min(1000, remaining)),
+      });
+      if (!res.ok) {
+        throw new ApiError(`Backend responded with status ${res.status}: ${res.statusText}`, res.status);
+      }
+      const data: unknown = await res.json().catch(() => null);
+      if (typeof data !== 'object' || data === null || !('status' in data) ||
+          data.status !== 'ok' || !('app' in data) || typeof data.app !== 'string' ||
+          !('version' in data) || typeof data.version !== 'string') {
+        throw new ApiError('Invalid backend health response.');
+      }
+      return { status: data.status, app: data.app, version: data.version };
+    } catch (err: unknown) {
+      const retryable = (err instanceof ApiError && err.status === 503) ||
+        err instanceof TypeError ||
+        (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError'));
+      if (!retryable) {
+        if (err instanceof ApiError) throw err;
+        throw new ApiError(err instanceof Error ? err.message : 'Unable to connect to local backend server.');
+      }
+      const delay = Math.min(250, Math.max(0, deadline - Date.now()));
+      if (delay > 0) await new Promise<void>((resolve) => setTimeout(resolve, delay));
     }
-    return await res.json();
-  } catch (err: any) {
-    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      throw new ApiError('Connection timed out waiting for backend server.');
-    }
-    throw new ApiError(err.message || 'Unable to connect to local backend server.');
   }
 }
 

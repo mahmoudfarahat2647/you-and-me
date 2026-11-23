@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { WorkflowCanvas } from './components/WorkflowCanvas';
 import { Inspector } from './components/Inspector';
@@ -19,6 +19,7 @@ export function App() {
   const [backendStatus, setBackendStatus] = useState<'checking' | 'healthy' | 'error'>('checking');
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const initializing = useRef(false);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
@@ -29,6 +30,8 @@ export function App() {
   const [selectedStage, setSelectedStage] = useState('script');
 
   const initBackendAndProjects = useCallback(async (isRetry = false) => {
+    if (initializing.current) return;
+    initializing.current = true;
     if (isRetry) {
       setIsRetrying(true);
       try {
@@ -43,9 +46,6 @@ export function App() {
     try {
       // 1. Check health
       await checkBackendHealth();
-      setBackendStatus('healthy');
-      setBackendError(null);
-
       // 2. Fetch projects from SQLite
       const loadedProjects = await listProjects();
       setProjects(loadedProjects);
@@ -61,17 +61,20 @@ export function App() {
       } else {
         setActiveProject(null);
       }
-    } catch (err: any) {
+      setBackendStatus('healthy');
+      setBackendError(null);
+    } catch (err: unknown) {
       // Check if Tauri process has more detail
       const tauriStatus = await getTauriBackendStatus();
       const detailedError =
         tauriStatus?.error ||
-        err.message ||
-        'Failed to connect to local backend service on port 8000.';
+        (err instanceof Error && err.message) ||
+        'Failed to connect to local backend service or load projects.';
 
       setBackendStatus('error');
       setBackendError(detailedError);
     } finally {
+      initializing.current = false;
       setIsRetrying(false);
     }
   }, []);
