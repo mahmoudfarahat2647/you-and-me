@@ -1,21 +1,37 @@
 import React, { useId, useState } from 'react';
 import {
-  FileText,
   X,
   Zap,
   Edit3,
   UserCheck,
+  PowerOff,
   ChevronDown,
   ChevronRight,
+  PanelRightClose,
+  PanelRightOpen,
 } from 'lucide-react';
+import { getStageDefinition, isStageId } from '../lib/workflow/stages';
+import type { StageExecutionMode } from '../types';
 
 interface InspectorProps {
   onClose?: () => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+  selectedStage?: string;
+  stageMode?: StageExecutionMode;
+  onStageModeChange?: (mode: StageExecutionMode) => void;
 }
 
-export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
+export const Inspector: React.FC<InspectorProps> = ({
+  onClose,
+  isCollapsed = false,
+  onToggleCollapse,
+  selectedStage = 'script',
+  stageMode,
+  onStageModeChange,
+}) => {
   const [activeTab, setActiveTab] = useState<'settings' | 'output' | 'logs'>('settings');
-  const [mode, setMode] = useState<'auto' | 'manual' | 'approval'>('auto');
+  const [localMode, setLocalMode] = useState<StageExecutionMode>('auto');
   const [provider, setProvider] = useState('ChatGPT');
   const [model, setModel] = useState('GPT-4o');
   const [scriptLength, setScriptLength] = useState('~ 8 minutes');
@@ -26,23 +42,70 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
   const toneId = useId();
   const temperatureId = useId();
 
+  const stage = getStageDefinition(isStageId(selectedStage) ? selectedStage : 'script');
+  const StageIcon = stage.icon;
+  const mode = stageMode ?? localMode;
+  const setMode = (next: StageExecutionMode) => {
+    if (onStageModeChange) {
+      onStageModeChange(next);
+    } else {
+      setLocalMode(next);
+    }
+  };
+
+  if (isCollapsed) {
+    return (
+      <aside
+        aria-label="Right panel"
+        className="w-11 shrink-0 border-l border-[#2e2e2e] bg-[#202020] flex flex-col items-center py-3 gap-3 select-none"
+      >
+        {onToggleCollapse && (
+          <button
+            type="button"
+            aria-label="Expand right panel"
+            aria-expanded={false}
+            title="Show right panel"
+            onClick={onToggleCollapse}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 hover:bg-[#282828] hover:text-neutral-100 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400"
+          >
+            <PanelRightOpen className="h-4 w-4" />
+          </button>
+        )}
+      </aside>
+    );
+  }
+
   return (
-    <aside className="w-72 shrink-0 border-l border-[#2e2e2e] bg-[#202020] flex flex-col justify-between select-none">
+    <aside
+      aria-label="Right panel"
+      className="w-72 shrink-0 border-l border-[#2e2e2e] bg-[#202020] flex flex-col justify-between select-none"
+    >
       <div className="flex-1 overflow-y-auto">
         {/* Header */}
         <div className="flex items-start justify-between p-4 border-b border-[#2e2e2e]">
           <div className="flex items-start gap-2.5">
             <div className="mt-0.5 text-neutral-300">
-              <FileText className="h-4 w-4" />
+              <StageIcon className="h-4 w-4" />
             </div>
             <div>
-              <h3 className="text-xs font-semibold text-neutral-100">Script</h3>
+              <h3 className="text-xs font-semibold text-neutral-100">{stage.label}</h3>
               <p className="text-[11px] text-neutral-400 mt-0.5">
-                Generate or edit the video script.
+                {stage.subtitle}
               </p>
             </div>
           </div>
-          {onClose && (
+          {onToggleCollapse ? (
+            <button
+              type="button"
+              aria-label="Collapse right panel"
+              aria-expanded={true}
+              title="Hide right panel"
+              onClick={onToggleCollapse}
+              className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 hover:bg-[#282828] hover:text-neutral-100 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400"
+            >
+              <PanelRightClose className="h-4 w-4" />
+            </button>
+          ) : onClose ? (
             <button
               aria-label="Close inspector"
               onClick={onClose}
@@ -50,7 +113,7 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
             >
               <X className="h-4 w-4" />
             </button>
-          )}
+          ) : null}
         </div>
 
         {/* Sub-tabs: Settings / Output / Logs */}
@@ -84,11 +147,11 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
               <span className="block text-[11px] font-medium text-neutral-400 mb-1.5">
                 Mode
               </span>
-              <div className="grid grid-cols-3 gap-1 rounded-lg border border-[#2e2e2e] bg-[#191919] p-0.5">
+              <div className="grid grid-cols-4 gap-1 rounded-lg border border-[#2e2e2e] bg-[#191919] p-0.5">
                 <button
                   type="button"
                   onClick={() => setMode('auto')}
-                  className={`flex items-center justify-center gap-1.5 py-1 px-1.5 rounded-md text-[11px] font-medium transition-all ${
+                  className={`flex items-center justify-center gap-1 py-1 px-1 rounded-md text-[11px] font-medium transition-all ${
                     mode === 'auto'
                       ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/30'
                       : 'text-neutral-400 hover:text-neutral-200'
@@ -100,7 +163,7 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
                 <button
                   type="button"
                   onClick={() => setMode('manual')}
-                  className={`flex items-center justify-center gap-1.5 py-1 px-1.5 rounded-md text-[11px] font-medium transition-all ${
+                  className={`flex items-center justify-center gap-1 py-1 px-1 rounded-md text-[11px] font-medium transition-all ${
                     mode === 'manual'
                       ? 'bg-[#282828] text-neutral-100 border border-[#383838]'
                       : 'text-neutral-400 hover:text-neutral-200'
@@ -112,7 +175,7 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
                 <button
                   type="button"
                   onClick={() => setMode('approval')}
-                  className={`flex items-center justify-center gap-1.5 py-1 px-1.5 rounded-md text-[11px] font-medium transition-all ${
+                  className={`flex items-center justify-center gap-1 py-1 px-1 rounded-md text-[11px] font-medium transition-all ${
                     mode === 'approval'
                       ? 'bg-[#282828] text-neutral-100 border border-[#383838]'
                       : 'text-neutral-400 hover:text-neutral-200'
@@ -120,6 +183,18 @@ export const Inspector: React.FC<InspectorProps> = ({ onClose }) => {
                 >
                   <UserCheck className="h-3 w-3" />
                   Approval
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode('off')}
+                  className={`flex items-center justify-center gap-1 py-1 px-1 rounded-md text-[11px] font-medium transition-all ${
+                    mode === 'off'
+                      ? 'bg-rose-950/40 text-rose-300 border border-rose-500/30'
+                      : 'text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  <PowerOff className="h-3 w-3" />
+                  Off
                 </button>
               </div>
             </div>

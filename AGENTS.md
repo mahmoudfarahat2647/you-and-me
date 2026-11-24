@@ -4,11 +4,12 @@
 
 Issues and specs are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
 
-### Ticket workflow
+### Phase workflow
 
-1. Before implementing a ticket, open a draft pull request targeting `main` and link it to the corresponding GitHub issue.
-2. After the pull request is merged into `main`, update the linked issue with the pull request reference and close it as completed.
-3. Start the next ticket or open another pull request only after the current pull request is merged into `main` and its issue is marked complete.
+1. Use GitHub milestones as the phases of delivery. Resolve blockers from outside the phase before opening its pull request.
+2. Before implementing a phase, open one draft pull request targeting `main` and include a separate `Closes #<number>` line for each issue in the milestone. For a standalone issue, use the same workflow with one issue.
+3. Implement dependencies within the phase in order in the same pull request. Verify the acceptance criteria for every linked issue before merging.
+4. After merging, confirm that each issue links to the pull request and is closed as completed. Start the next phase or standalone issue after those checks pass.
 
 ### Triage labels
 

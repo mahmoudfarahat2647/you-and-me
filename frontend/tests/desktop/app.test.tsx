@@ -43,3 +43,38 @@ it('does not start duplicate health checks in strict mode', async () => {
   await vi.waitFor(() => expect(listProjects).toHaveBeenCalled());
   expect(checkBackendHealth).toHaveBeenCalledTimes(1);
 });
+
+it('toggles the right inspector panel open and collapsed from the button inside the right panel', async () => {
+  vi.mocked(listProjects).mockResolvedValueOnce([
+    {
+      id: 'proj-1',
+      name: 'Pyramids Documentary',
+      description: '',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    },
+  ]);
+
+  render(<App />);
+
+  const rightPanel = await screen.findByRole('complementary', { name: /right panel/i });
+  const collapseButton = screen.getByRole('button', { name: /collapse right panel/i });
+  expect(rightPanel).toContainElement(collapseButton);
+  expect(collapseButton).toHaveAttribute('aria-expanded', 'true');
+  expect(rightPanel.className).toContain('w-72');
+  expect(screen.getByRole('combobox', { name: 'Provider' })).toBeInTheDocument();
+
+  fireEvent.click(collapseButton);
+
+  const expandButton = screen.getByRole('button', { name: /expand right panel/i });
+  expect(rightPanel).toContainElement(expandButton);
+  expect(expandButton).toHaveAttribute('aria-expanded', 'false');
+  expect(rightPanel.className).toContain('w-11');
+  expect(screen.queryByRole('combobox', { name: 'Provider' })).not.toBeInTheDocument();
+
+  fireEvent.click(expandButton);
+
+  expect(screen.getByRole('button', { name: /collapse right panel/i })).toHaveAttribute('aria-expanded', 'true');
+  expect(rightPanel.className).toContain('w-72');
+  expect(screen.getByRole('combobox', { name: 'Provider' })).toBeInTheDocument();
+});

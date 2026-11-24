@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -17,7 +17,8 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import type { Project, StageId, StageRuntimeState } from '../types';
+import type { Project, StageExecutionMode, StageId, StageRuntimeState } from '../types';
+import { WORKFLOW_STAGES } from '../lib/workflow/stages';
 import { Button } from './ui/button';
 import { AgentNodeCardNode, type AgentNodeCardFlowNode } from './workflow/AgentNodeCardNode';
 import { useWorkflowController } from './workflow/useWorkflowController';
@@ -29,6 +30,12 @@ interface WorkflowCanvasProps {
   onSelectStage: (stage: string) => void;
   /** Caller-supplied engine state. Missing stages are truthfully shown as idle. */
   stageStates?: Partial<Record<StageId, StageRuntimeState>>;
+  /** Optional externally managed execution modes per stage. */
+  stageModes?: Partial<Record<StageId, StageExecutionMode>>;
+  onStageModeChange?: (stage: StageId, mode: StageExecutionMode) => void;
+  onRunStage?: (stage: StageId) => void;
+  onRunWorkflow?: () => void;
+  isInspectorOpen?: boolean;
 }
 
 const nodeTypes = {
@@ -37,20 +44,42 @@ const nodeTypes = {
 
 type InteractionMode = 'select' | 'pan';
 
-const FIT_VIEW_OPTIONS = { padding: 0.08, maxZoom: 1 } as const;
+const FIT_VIEW_OPTIONS = { padding: 0.12, maxZoom: 1 } as const;
+const PREVIEW_STEP_DURATION_MS = 1400;
 
-const WorkflowSurface: React.FC<Pick<WorkflowCanvasProps, 'selectedStage' | 'onSelectStage' | 'stageStates'>> = ({
+interface WorkflowSurfaceProps {
+  selectedStage: string;
+  onSelectStage: (stage: string) => void;
+  stageStates?: Partial<Record<StageId, StageRuntimeState>>;
+  stageToggles?: Partial<Record<StageId, Record<string, boolean>>>;
+  onRunStage: (stage: StageId) => void;
+  onToggleStageAuto: (stage: StageId, enabled: boolean) => void;
+  onToggleStageOption: (stage: StageId, toggleId: string, checked: boolean) => void;
+  isInspectorOpen?: boolean;
+}
+
+const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
   selectedStage,
   onSelectStage,
   stageStates,
+  stageToggles,
+  onRunStage,
+  onToggleStageAuto,
+  onToggleStageOption,
+  isInspectorOpen,
 }) => {
   const [interactionMode, setInteractionMode] = useState<InteractionMode>('select');
   const [zoom, setZoom] = useState(100);
   const { fitView, zoomIn, zoomOut } = useReactFlow();
+  const prevInspectorOpenRef = useRef(isInspectorOpen);
   const { nodes: controllerNodes, edges } = useWorkflowController({
     selectedStage,
     stageStates,
+    stageToggles,
     onSelectStage,
+    onRunStage,
+    onToggleStageAuto,
+    onToggleStageOption,
   });
 
   const [nodes, setNodes, onNodesChange] = useNodesState<AgentNodeCardFlowNode>(controllerNodes);
@@ -65,6 +94,15 @@ const WorkflowSurface: React.FC<Pick<WorkflowCanvasProps, 'selectedStage' | 'onS
     );
   }, [controllerNodes, setNodes]);
 
+  // Refit the workflow nodes when the right inspector panel opens or closes.
+  useEffect(() => {
+    if (prevInspectorOpenRef.current === isInspectorOpen) return;
+    prevInspectorOpenRef.current = isInspectorOpen;
+    const frameId = window.requestAnimationFrame(() => {
+      void fitView(FIT_VIEW_OPTIONS);
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [isInspectorOpen, fitView]);
 
   const hasProgress = stageStates !== undefined && Object.values(stageStates).some(
     (s) => s !== undefined && s.status !== 'pending' && s.status !== 'cancelled' && s.status !== 'skipped',
@@ -163,8 +201,146 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   selectedStage,
   onSelectStage,
   stageStates,
+  stageModes,
+  onStageModeChange,
+  onRunStage,
+  onRunWorkflow,
+  isInspectorOpen = true,
 }) => {
   const [activeTab, setActiveTab] = useState<'workflow' | 'assets' | 'output' | 'logs'>('workflow');
+  const [localModes, setLocalModes] = useState<Partial<Record<StageId, StageExecutionMode>>>({});
+  const [localToggles, setLocalToggles] = useState<Partial<Record<StageId, Record<string, boolean>>>>({});
+  const [localRunStates, setLocalRunStates] = useState<Partial<Record<StageId, StageRuntimeState>>>({});
+  const [isRunningWorkflow, setIsRunningWorkflow] = useState(false);
+
+  const mountedRef = useRef(true);
+  const timersRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const timers = timersRef.current;
+    return () => {
+      mountedRef.current = false;
+      for (const id of timers) {
+        window.clearTimeout(id);
+      }
+      timers.clear();
+    };
+  }, []);
+
+  const waitStep = useCallback((ms: number) => {
+    return new Promise<void>((resolve) => {
+      const id = window.setTimeout(() => {
+        timersRef.current.delete(id);
+        resolve();
+      }, ms);
+      timersRef.current.add(id);
+    });
+  }, []);
+
+  const getStageMode = useCallback(
+    (stageId: StageId): StageExecutionMode =>
+      stageModes?.[stageId] ?? localModes[stageId] ?? stageStates?.[stageId]?.mode ?? 'auto',
+    [stageModes, localModes, stageStates]
+  );
+
+  const handleToggleStageAuto = useCallback(
+    (stageId: StageId, enabled: boolean) => {
+      const nextMode: StageExecutionMode = enabled ? 'auto' : 'off';
+      if (onStageModeChange) {
+        onStageModeChange(stageId, nextMode);
+      } else {
+        setLocalModes((prev) => ({ ...prev, [stageId]: nextMode }));
+      }
+    },
+    [onStageModeChange]
+  );
+
+  const handleToggleStageOption = useCallback(
+    (stageId: StageId, toggleId: string, checked: boolean) => {
+      setLocalToggles((prev) => ({
+        ...prev,
+        [stageId]: {
+          ...(prev[stageId] ?? {}),
+          [toggleId]: checked,
+        },
+      }));
+    },
+    []
+  );
+
+  const runLocalStage = useCallback(
+    async (stageId: StageId) => {
+      if (getStageMode(stageId) === 'off') return;
+      setLocalRunStates((prev) => ({
+        ...prev,
+        [stageId]: { status: 'running' },
+      }));
+      await waitStep(PREVIEW_STEP_DURATION_MS);
+      if (!mountedRef.current) return;
+      setLocalRunStates((prev) => ({
+        ...prev,
+        [stageId]: { status: 'completed' },
+      }));
+    },
+    [getStageMode, waitStep]
+  );
+
+  const handleRunStage = useCallback(
+    (stageId: StageId) => {
+      if (onRunStage) {
+        onRunStage(stageId);
+        return;
+      }
+      void runLocalStage(stageId);
+    },
+    [onRunStage, runLocalStage]
+  );
+
+  const handleRunWorkflow = useCallback(async () => {
+    if (onRunWorkflow) {
+      onRunWorkflow();
+      return;
+    }
+    if (isRunningWorkflow) return;
+
+    setIsRunningWorkflow(true);
+    setLocalRunStates({});
+    try {
+      for (const stage of WORKFLOW_STAGES) {
+        if (!mountedRef.current) return;
+        if (getStageMode(stage.id) === 'off') continue;
+        await runLocalStage(stage.id);
+      }
+    } finally {
+      if (mountedRef.current) {
+        setIsRunningWorkflow(false);
+      }
+    }
+  }, [onRunWorkflow, isRunningWorkflow, getStageMode, runLocalStage]);
+
+  const effectiveStageStates = useMemo<Partial<Record<StageId, StageRuntimeState>> | undefined>(() => {
+    const merged: Partial<Record<StageId, StageRuntimeState>> = {};
+    let hasAnyEntry = false;
+
+    for (const stage of WORKFLOW_STAGES) {
+      const callerState = stageStates?.[stage.id];
+      const localRun = localRunStates[stage.id];
+      const overrideMode = stageModes?.[stage.id] ?? localModes[stage.id];
+
+      if (callerState || localRun || overrideMode) {
+        hasAnyEntry = true;
+        merged[stage.id] = {
+          ...(localRun ?? {}),
+          ...(callerState ?? {}),
+          status: callerState?.status ?? localRun?.status ?? 'pending',
+          mode: overrideMode ?? callerState?.mode,
+        };
+      }
+    }
+
+    return hasAnyEntry ? merged : undefined;
+  }, [stageStates, localRunStates, stageModes, localModes]);
 
   return (
     <div className="flex-1 flex flex-col bg-[#191919] select-none min-w-0 overflow-hidden">
@@ -193,9 +369,14 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             </Button>
           </div>
 
-          <Button variant="workflow" className="gap-2">
+          <Button
+            variant="workflow"
+            className="gap-2"
+            disabled={isRunningWorkflow}
+            onClick={() => void handleRunWorkflow()}
+          >
             <Play className="h-3 w-3 fill-emerald-400" />
-            <span>Run Workflow</span>
+            <span>{isRunningWorkflow ? 'Running…' : 'Run Workflow'}</span>
           </Button>
         </div>
 
@@ -228,7 +409,12 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         <WorkflowSurface
           selectedStage={selectedStage}
           onSelectStage={onSelectStage}
-          stageStates={stageStates}
+          stageStates={effectiveStageStates}
+          stageToggles={localToggles}
+          onRunStage={handleRunStage}
+          onToggleStageAuto={handleToggleStageAuto}
+          onToggleStageOption={handleToggleStageOption}
+          isInspectorOpen={isInspectorOpen}
         />
       </ReactFlowProvider>
     </div>
