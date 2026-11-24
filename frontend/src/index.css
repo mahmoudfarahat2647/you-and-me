@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+/* The desktop app is dark-only. Make the supplied dark: variants use the
+   existing charcoal workspace instead of the OS colour scheme. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* shadcn semantic tokens used by the shared workflow node card, mapped to the
+   approved Notion-inspired charcoal palette. */
+@theme inline {
+  --color-background: var(--bg-app);
+  --color-foreground: var(--text-primary);
+  --color-card: var(--bg-surface);
+  --color-card-foreground: var(--text-primary);
+  --color-popover: var(--bg-card);
+  --color-popover-foreground: var(--text-primary);
+  --color-primary: var(--accent-green);
+  --color-primary-foreground: #08130b;
+  --color-muted: #262626;
+  --color-muted-foreground: var(--text-secondary);
+  --color-border: var(--border-hairline);
+  --color-ring: var(--accent-green);
+}
+
 @layer base {
   :root {
     --bg-app: #191919;
@@ -50,4 +71,26 @@
 .canvas-dots {
   background-image: radial-gradient(#333333 1px, transparent 1px);
   background-size: 20px 20px;
+}
+
+/* React Flow sits transparently on the approved dotted canvas. */
+.agent-workflow-canvas.react-flow {
+  background: transparent;
+}
+
+.agent-workflow-canvas .react-flow__attribution {
+  background: transparent;
+  color: #6b6b6b;
+}
+
+.agent-workflow-canvas .react-flow__attribution a {
+  color: inherit;
+}
+
+/* Transparent React Flow handle aligned with the card's own port marker. */
+.agent-node-handle.react-flow__handle {
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 0;
+  background: transparent;
 }

@@ -67,7 +67,7 @@ test('workflow exposes keyboard stage selection without invented progress and na
   const user = userEvent.setup()
   const selected = vi.fn()
   render(<WorkflowCanvas project={project} onOpenProjectsModal={() => {}} selectedStage="idea" onSelectStage={selected} />)
-  const script = screen.getByRole('button', { name: 'Script' })
+  const script = screen.getByRole('group', { name: 'Script' })
   script.focus()
   await user.keyboard('{Enter}')
   expect(selected).toHaveBeenCalledWith('script')
