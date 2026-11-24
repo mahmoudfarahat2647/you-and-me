@@ -1,46 +1,170 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  useNodesState,
+  useReactFlow,
+  type Edge,
+  type NodeTypes,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 import {
   Play,
   MoreHorizontal,
-  Lightbulb,
-  FileText,
-  Mic,
-  Image as ImageIcon,
-  Film,
-  Upload,
   MousePointer,
   Hand,
   Maximize2,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import type { Project } from '../types';
+import type { Project, StageId, StageRuntimeState } from '../types';
 import { Button } from './ui/button';
+import { AgentNodeCardNode, type AgentNodeCardFlowNode } from './workflow/AgentNodeCardNode';
+import { useWorkflowController } from './workflow/useWorkflowController';
 
 interface WorkflowCanvasProps {
   project: Project;
   onOpenProjectsModal: () => void;
   selectedStage: string;
   onSelectStage: (stage: string) => void;
+  /** Caller-supplied engine state. Missing stages are truthfully shown as idle. */
+  stageStates?: Partial<Record<StageId, StageRuntimeState>>;
 }
+
+const nodeTypes = {
+  agentNodeCard: AgentNodeCardNode,
+} satisfies NodeTypes;
+
+type InteractionMode = 'select' | 'pan';
+
+const FIT_VIEW_OPTIONS = { padding: 0.08, maxZoom: 1 } as const;
+
+const WorkflowSurface: React.FC<Pick<WorkflowCanvasProps, 'selectedStage' | 'onSelectStage' | 'stageStates'>> = ({
+  selectedStage,
+  onSelectStage,
+  stageStates,
+}) => {
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>('select');
+  const [zoom, setZoom] = useState(100);
+  const { fitView, zoomIn, zoomOut } = useReactFlow();
+  const { nodes: controllerNodes, edges } = useWorkflowController({
+    selectedStage,
+    stageStates,
+    onSelectStage,
+  });
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<AgentNodeCardFlowNode>(controllerNodes);
+
+  // Keep React Flow's dragged positions while controller data stays authoritative.
+  useEffect(() => {
+    setNodes((current) =>
+      controllerNodes.map((node) => {
+        const existing = current.find((candidate) => candidate.id === node.id);
+        return existing ? { ...node, position: existing.position } : node;
+      })
+    );
+  }, [controllerNodes, setNodes]);
+
+
+  const hasProgress = stageStates !== undefined && Object.values(stageStates).some(
+    (s) => s !== undefined && s.status !== 'pending' && s.status !== 'cancelled' && s.status !== 'skipped',
+  );
+
+  return (
+    <div className="flex-1 relative overflow-hidden canvas-dots">
+      {!hasProgress && (
+        <p className="pointer-events-none absolute top-3 left-4 z-10 text-xs text-neutral-400">
+          No workflow progress available yet.
+        </p>
+      )}
+
+      <ReactFlow<AgentNodeCardFlowNode, Edge>
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onMove={(_event, viewport) => setZoom(Math.round(viewport.zoom * 100))}
+        fitView
+        fitViewOptions={FIT_VIEW_OPTIONS}
+        minZoom={0.15}
+        maxZoom={2}
+        nodesDraggable={interactionMode === 'select'}
+        nodesConnectable={false}
+        nodesFocusable={false}
+        elementsSelectable={false}
+        panOnDrag={interactionMode === 'pan'}
+        selectionOnDrag={interactionMode === 'select'}
+        className="agent-workflow-canvas"
+      >
+        {/* The dotted paper comes from the existing canvas-dots background. */}
+      </ReactFlow>
+
+      {/* Floating bottom canvas toolbar */}
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 rounded-xl border border-[#2e2e2e] bg-[#202020] px-2 py-1.5 shadow-xl text-neutral-400">
+        <Button
+          aria-label="Select"
+          aria-pressed={interactionMode === 'select'}
+          variant="ghost"
+          size="icon"
+          className={`h-6 w-6 ${interactionMode === 'select' ? 'bg-[#2c2c2c] text-neutral-100' : ''}`}
+          onClick={() => setInteractionMode('select')}
+        >
+          <MousePointer className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          aria-label="Pan"
+          aria-pressed={interactionMode === 'pan'}
+          variant="ghost"
+          size="icon"
+          className={`h-6 w-6 ${interactionMode === 'pan' ? 'bg-[#2c2c2c] text-neutral-100' : ''}`}
+          onClick={() => setInteractionMode('pan')}
+        >
+          <Hand className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          aria-label="Fit view"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={() => void fitView(FIT_VIEW_OPTIONS)}
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </Button>
+        <div className="h-4 w-[1px] bg-[#2e2e2e] mx-1" />
+        <Button
+          aria-label="Zoom out"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={() => void zoomOut()}
+        >
+          <ZoomOut className="h-3.5 w-3.5" />
+        </Button>
+        <span className="px-1 text-[11px] font-mono text-neutral-300 min-w-[3.5rem] text-center">
+          {zoom}%
+        </span>
+        <Button
+          aria-label="Zoom in"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={() => void zoomIn()}
+        >
+          <ZoomIn className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+};
 
 export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   project,
   onOpenProjectsModal,
   selectedStage,
   onSelectStage,
+  stageStates,
 }) => {
   const [activeTab, setActiveTab] = useState<'workflow' | 'assets' | 'output' | 'logs'>('workflow');
-  const [zoom, setZoom] = useState(100);
-
-  const stages = [
-    { id: 'idea', label: 'Idea', icon: Lightbulb },
-    { id: 'script', label: 'Script', icon: FileText },
-    { id: 'voice', label: 'Voice', icon: Mic },
-    { id: 'scenes', label: 'Scenes', icon: ImageIcon },
-    { id: 'edit', label: 'Edit', icon: Film },
-    { id: 'export', label: 'Export', icon: Upload },
-  ];
 
   return (
     <div className="flex-1 flex flex-col bg-[#191919] select-none min-w-0 overflow-hidden">
@@ -100,83 +224,13 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       </div>
 
       {/* Main Canvas View */}
-      <div className="flex-1 relative overflow-hidden canvas-dots flex items-center justify-center p-8">
-        <p className="absolute top-3 left-4 text-xs text-neutral-400">No workflow progress available yet.</p>
-        {/* Connected Stages */}
-        <div className="flex items-center gap-3 max-w-full overflow-x-auto p-4">
-          {stages.map((stage, idx) => {
-            const isSelected = selectedStage === stage.id;
-            const Icon = stage.icon;
-
-            return (
-              <React.Fragment key={stage.id}>
-                {/* Stage Node Box */}
-                <button
-                  type="button"
-                  aria-pressed={isSelected}
-                  onClick={() => onSelectStage(stage.id)}
-                  className={`relative flex shrink-0 flex-col items-center justify-center w-20 h-24 rounded-xl border transition-all cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400 ${
-                    isSelected
-                      ? 'border-emerald-500/80 bg-[#202020] shadow-[0_0_15px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/50'
-                      : 'border-[#2e2e2e] bg-[#202020] hover:border-[#3a3a3a] hover:bg-[#242424]'
-                  }`}
-                >
-                  <div className={`mt-1 p-2 rounded-lg ${isSelected ? 'text-emerald-400' : 'text-neutral-300'}`}>
-                    <Icon className="h-6 w-6 stroke-[1.75]" />
-                  </div>
-                  <span className="mt-1 text-xs font-medium text-neutral-200">
-                    {stage.label}
-                  </span>
-                </button>
-
-                {/* Connecting arrow */}
-                {idx < stages.length - 1 && (
-                  <div className="flex items-center text-neutral-600 px-0.5">
-                    <svg width="20" height="12" viewBox="0 0 20 12" fill="none" className="stroke-current">
-                      <path d="M0 6H16M16 6L11 1M16 6L11 11" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </div>
-                )}
-              </React.Fragment>
-            );
-          })}
-        </div>
-
-        {/* Floating Bottom Canvas Toolbar */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-xl border border-[#2e2e2e] bg-[#202020] px-2 py-1.5 shadow-xl text-neutral-400">
-          <Button aria-label="Select" variant="ghost" size="icon" className="h-6 w-6">
-            <MousePointer className="h-3.5 w-3.5" />
-          </Button>
-          <Button aria-label="Pan" variant="ghost" size="icon" className="h-6 w-6">
-            <Hand className="h-3.5 w-3.5" />
-          </Button>
-          <Button aria-label="Fit view" variant="ghost" size="icon" className="h-6 w-6">
-            <Maximize2 className="h-3.5 w-3.5" />
-          </Button>
-          <div className="h-4 w-[1px] bg-[#2e2e2e] mx-1" />
-          <Button
-            aria-label="Zoom out"
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => setZoom(Math.max(25, zoom - 10))}
-          >
-            <ZoomOut className="h-3.5 w-3.5" />
-          </Button>
-          <span className="px-1 text-[11px] font-mono text-neutral-300 min-w-[3.5rem] text-center">
-            {zoom}%
-          </span>
-          <Button
-            aria-label="Zoom in"
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => setZoom(Math.min(200, zoom + 10))}
-          >
-            <ZoomIn className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </div>
+      <ReactFlowProvider>
+        <WorkflowSurface
+          selectedStage={selectedStage}
+          onSelectStage={onSelectStage}
+          stageStates={stageStates}
+        />
+      </ReactFlowProvider>
     </div>
   );
 };
