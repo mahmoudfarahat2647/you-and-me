@@ -1,13 +1,14 @@
 import { renderHook } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
-import { useWorkflowController } from '../../src/components/workflow/useWorkflowController'
+import { AGENT_NODE_WIDTH, useWorkflowController } from '../../src/components/workflow/useWorkflowController'
 import type { StageRuntimeState } from '../../src/types'
 
-test('builds the six approved stages in order with a connected chain', () => {
+test('builds the six approved stages in order with w-80 width, staggered Y and Bezier connectors', () => {
   const { result } = renderHook(() =>
     useWorkflowController({ selectedStage: 'idea', onSelectStage: () => {} })
   )
 
+  expect(AGENT_NODE_WIDTH).toBe(320)
   expect(result.current.nodes.map((node) => node.data.title)).toEqual([
     'Idea',
     'Script',
@@ -21,6 +22,15 @@ test('builds the six approved stages in order with a connected chain', () => {
   expect(xs).toEqual([...xs].sort((a, b) => a - b))
   expect(new Set(xs).size).toBe(xs.length)
 
+  const ys = result.current.nodes.map((node) => node.position.y)
+  expect(new Set(ys).size).toBeGreaterThan(1)
+
+  for (const node of result.current.nodes) {
+    expect(node.style?.width).toBe(320)
+    expect(node.data.params?.length).toBe(3)
+    expect(node.data.toggles?.some((t) => t.id === 'autoMode' && t.label === 'Auto mode')).toBe(true)
+  }
+
   expect(result.current.edges.map((edge) => `${edge.source}->${edge.target}`)).toEqual([
     'idea->script',
     'script->voice',
@@ -28,6 +38,10 @@ test('builds the six approved stages in order with a connected chain', () => {
     'scenes->edit',
     'edit->export',
   ])
+  for (const edge of result.current.edges) {
+    expect(edge.type).toBe('default')
+    expect(edge.markerEnd).toBeUndefined()
+  }
 })
 
 test('ports follow the approved stage order without duplicates', () => {
@@ -45,7 +59,9 @@ test('ports follow the approved stage order without duplicates', () => {
   expect(exportNode.data.showOutputPort).toBe(false)
 })
 
-test('maps richer stage states while leaving execution out of the canvas', () => {
+test('maps richer stage states, animates running edges, and wires run/auto handlers', () => {
+  const onRunStage = vi.fn()
+  const onToggleStageAuto = vi.fn()
   const stageStates: Partial<Record<'idea' | 'script' | 'voice' | 'scenes', StageRuntimeState>> = {
     idea: { status: 'running' },
     script: { status: 'completed' },
@@ -54,7 +70,13 @@ test('maps richer stage states while leaving execution out of the canvas', () =>
   }
 
   const { result } = renderHook(() =>
-    useWorkflowController({ selectedStage: 'idea', stageStates, onSelectStage: () => {} })
+    useWorkflowController({
+      selectedStage: 'idea',
+      stageStates,
+      onSelectStage: () => {},
+      onRunStage,
+      onToggleStageAuto,
+    })
   )
   const [idea, script, voice, scenes, edit, exportNode] = result.current.nodes
 
@@ -69,9 +91,18 @@ test('maps richer stage states while leaving execution out of the canvas', () =>
   expect(edit.data).toMatchObject({ status: 'idle', statusLabel: 'Idle' })
   expect(exportNode.data).toMatchObject({ status: 'idle', statusLabel: 'Idle' })
 
-  for (const node of result.current.nodes) {
-    expect(node.data.onRunNode).toBeUndefined()
-  }
+  expect(result.current.edges[0].animated).toBe(true)
+  expect(result.current.edges[1].animated).toBe(false)
+  expect(result.current.edges[1].style?.strokeDasharray).toBeUndefined()
+  expect(result.current.edges[2].style?.stroke).toBe('#f43f5e')
+
+  script.data.onRunNode?.()
+  expect(onRunStage).toHaveBeenCalledWith('script')
+
+  const scenesAutoToggle = scenes.data.toggles?.find((t) => t.id === 'autoMode')
+  expect(scenesAutoToggle?.checked).toBe(false)
+  scenesAutoToggle?.onCheckedChange(true)
+  expect(onToggleStageAuto).toHaveBeenCalledWith('scenes', true)
 })
 
 test('selection is sourced from the controller and clicking a card selects its stage', () => {

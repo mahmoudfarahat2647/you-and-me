@@ -92,3 +92,23 @@ test('inspector settings are labelled and logs do not claim an event occurred', 
   await waitFor(() => expect(screen.getByText(/no logs/i)).toBeInTheDocument())
   expect(screen.queryByText(/stage initialized/i)).not.toBeInTheDocument()
 })
+
+test('inspector renders internal toggle button in expanded and collapsed states', async () => {
+  const user = userEvent.setup()
+  const onToggleCollapse = vi.fn()
+  const { rerender } = render(<Inspector isCollapsed={false} onToggleCollapse={onToggleCollapse} />)
+
+  const panel = screen.getByRole('complementary', { name: /right panel/i })
+  const collapseBtn = screen.getByRole('button', { name: /collapse right panel/i })
+  expect(panel).toContainElement(collapseBtn)
+  expect(collapseBtn).toHaveAttribute('aria-expanded', 'true')
+  await user.click(collapseBtn)
+  expect(onToggleCollapse).toHaveBeenCalledTimes(1)
+
+  rerender(<Inspector isCollapsed={true} onToggleCollapse={onToggleCollapse} />)
+  const expandBtn = screen.getByRole('button', { name: /expand right panel/i })
+  expect(panel).toContainElement(expandBtn)
+  expect(expandBtn).toHaveAttribute('aria-expanded', 'false')
+  await user.click(expandBtn)
+  expect(onToggleCollapse).toHaveBeenCalledTimes(2)
+})

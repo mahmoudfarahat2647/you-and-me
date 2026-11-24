@@ -11,7 +11,8 @@ import {
   getTauriBackendStatus,
   restartTauriBackend,
 } from './api/client';
-import type { Project } from './types';
+import { isStageId } from './lib/workflow/stages';
+import type { Project, StageExecutionMode, StageId } from './types';
 import { Loader2, Plus, Sparkles } from 'lucide-react';
 import { Button } from './components/ui/button';
 
@@ -27,7 +28,13 @@ export function App() {
 
   const [isProjectsModalOpen, setIsProjectsModalOpen] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isInspectorOpen, setIsInspectorOpen] = useState(true);
   const [selectedStage, setSelectedStage] = useState('script');
+  const [stageModes, setStageModes] = useState<Partial<Record<StageId, StageExecutionMode>>>({});
+
+  const handleStageModeChange = useCallback((stage: StageId, mode: StageExecutionMode) => {
+    setStageModes((prev) => ({ ...prev, [stage]: mode }));
+  }, []);
 
   const initBackendAndProjects = useCallback(async (isRetry = false) => {
     if (initializing.current) return;
@@ -134,6 +141,9 @@ export function App() {
                 onOpenProjectsModal={() => setIsProjectsModalOpen(true)}
                 selectedStage={selectedStage}
                 onSelectStage={setSelectedStage}
+                stageModes={stageModes}
+                onStageModeChange={handleStageModeChange}
+                isInspectorOpen={isInspectorOpen}
               />
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center canvas-dots">
@@ -166,7 +176,19 @@ export function App() {
           </main>
 
           {/* Right Inspector */}
-          {activeProject && <Inspector />}
+          {activeProject && (
+            <Inspector
+              isCollapsed={!isInspectorOpen}
+              onToggleCollapse={() => setIsInspectorOpen((open) => !open)}
+              selectedStage={selectedStage}
+              stageMode={isStageId(selectedStage) ? (stageModes[selectedStage] ?? 'auto') : 'auto'}
+              onStageModeChange={(mode) => {
+                if (isStageId(selectedStage)) {
+                  handleStageModeChange(selectedStage, mode);
+                }
+              }}
+            />
+          )}
         </>
       )}
 

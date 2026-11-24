@@ -94,3 +94,23 @@
   border: 0;
   background: transparent;
 }
+
+@keyframes agent-edge-flow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.agent-workflow-canvas .react-flow__edge.animated path {
+  stroke-dasharray: 6 6;
+  animation: agent-edge-flow 0.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-workflow-canvas .react-flow__edge.animated path {
+    animation: none;
+  }
+}

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { expect, test, vi } from 'vitest'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, expect, test, vi } from 'vitest'
 import { WorkflowCanvas } from '../../src/components/WorkflowCanvas'
 import type { Project, StageRuntimeState } from '../../src/types'
 
@@ -18,29 +18,67 @@ const stageStates: Partial<Record<'idea' | 'script' | 'voice' | 'scenes', StageR
   scenes: { status: 'pending', mode: 'off' },
 }
 
-function renderCanvas(selectedStage = 'idea') {
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+function renderCanvas(selectedStage = 'idea', customStates?: Partial<Record<'idea' | 'script' | 'voice' | 'scenes', StageRuntimeState>>) {
   return render(
     <WorkflowCanvas
       project={project}
       onOpenProjectsModal={() => {}}
       selectedStage={selectedStage}
       onSelectStage={() => {}}
-      stageStates={stageStates}
+      stageStates={customStates}
     />
   )
 }
 
-test('renders all six stages through the shared card component', () => {
-  renderCanvas()
+test('renders all six stages with params, Auto mode toggle, and footer run button', () => {
+  renderCanvas('idea')
 
   for (const name of ['Idea', 'Script', 'Voice', 'Scenes', 'Edit', 'Export']) {
-    expect(screen.getByRole('group', { name })).toBeInTheDocument()
+    const card = screen.getByRole('group', { name })
+    expect(card).toBeInTheDocument()
+    expect(within(card).getByRole('switch', { name: 'Auto mode' })).toBeChecked()
+    expect(within(card).getByRole('button', { name: 'Run node' })).toBeEnabled()
   }
   expect(document.querySelectorAll('.react-flow__node')).toHaveLength(6)
 })
 
+test('toggling Auto mode off disables that phase and updates its footer', () => {
+  renderCanvas('idea')
+
+  const scriptCard = screen.getByRole('group', { name: 'Script' })
+  const autoSwitch = within(scriptCard).getByRole('switch', { name: 'Auto mode' })
+
+  fireEvent.click(autoSwitch)
+
+  expect(autoSwitch).not.toBeChecked()
+  expect(within(scriptCard).getByText('Execution off')).toBeInTheDocument()
+  expect(within(scriptCard).getByRole('button', { name: 'Run node' })).toBeDisabled()
+})
+
+test('clicking Run node transitions a phase from Running to Completed', async () => {
+  vi.useFakeTimers()
+  renderCanvas('idea')
+
+  const ideaCard = screen.getByRole('group', { name: 'Idea' })
+  fireEvent.click(within(ideaCard).getByRole('button', { name: 'Run node' }))
+
+  expect(within(ideaCard).getByRole('status')).toHaveTextContent('Running')
+  expect(within(ideaCard).getByRole('button', { name: 'Running…' })).toBeDisabled()
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1500)
+  })
+
+  expect(within(ideaCard).getByRole('status')).toHaveTextContent('Completed')
+  expect(within(ideaCard).getByRole('button', { name: 'Run again' })).toBeEnabled()
+})
+
 test('maps richer stage states to the four visual states and truthful labels', () => {
-  renderCanvas()
+  renderCanvas('idea', stageStates)
 
   const cases = [
     ['Idea', 'Running'],
@@ -63,7 +101,7 @@ test('maps richer stage states to the four visual states and truthful labels', (
 })
 
 test('the selected stage shows the supplied selection ring and others do not', () => {
-  renderCanvas('voice')
+  renderCanvas('voice', stageStates)
 
   expect(screen.getByRole('group', { name: 'Voice' })).toHaveAttribute('data-selected', 'true')
   expect(screen.getByRole('group', { name: 'Voice' })).toHaveAttribute('aria-current', 'step')
@@ -72,7 +110,7 @@ test('the selected stage shows the supplied selection ring and others do not', (
 })
 
 test('each card exposes React Flow handles aligned to its visible ports with no duplicates', () => {
-  renderCanvas()
+  renderCanvas('idea', stageStates)
 
   const expectations: Record<string, { handles: number; ports: number }> = {
     idea: { handles: 1, ports: 1 },
@@ -99,18 +137,8 @@ test('each card exposes React Flow handles aligned to its visible ports with no 
   }
 })
 
-test('real execution stays outside the presentation canvas', () => {
-  renderCanvas()
-
-  expect(screen.queryByRole('button', { name: 'Run node' })).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Run again' })).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
-  // stageStates has active entries (running/completed/failed) → banner must be hidden
-  expect(screen.queryByText(/no workflow progress available/i)).not.toBeInTheDocument()
-})
-
-test('banner appears when no stage states are supplied', () => {
-  render(
+test('banner appears when no stage states are supplied and hides when active states exist', () => {
+  const { rerender } = render(
     <WorkflowCanvas
       project={project}
       onOpenProjectsModal={() => {}}
@@ -119,14 +147,26 @@ test('banner appears when no stage states are supplied', () => {
     />
   )
   expect(screen.getByText(/no workflow progress available/i)).toBeInTheDocument()
+
+  rerender(
+    <WorkflowCanvas
+      project={project}
+      onOpenProjectsModal={() => {}}
+      selectedStage="idea"
+      onSelectStage={() => {}}
+      stageStates={stageStates}
+    />
+  )
+  expect(screen.queryByText(/no workflow progress available/i)).not.toBeInTheDocument()
 })
 
 test('execution mode is shown independently of status', () => {
-  renderCanvas()
+  renderCanvas('idea', stageStates)
 
-  expect(within(screen.getByRole('group', { name: 'Idea' })).getByText('Auto mode')).toBeInTheDocument()
+  const ideaCard = screen.getByRole('group', { name: 'Idea' })
+  expect(within(ideaCard.querySelector('footer')!).getByText('Auto mode')).toBeInTheDocument()
   expect(within(screen.getByRole('group', { name: 'Scenes' })).getByText('Execution off')).toBeInTheDocument()
-  expect(within(screen.getByRole('group', { name: 'Idea' })).getByRole('status')).toHaveTextContent('Running')
+  expect(within(ideaCard).getByRole('status')).toHaveTextContent('Running')
 })
 
 test('clicking a stage card dispatches onSelectStage once and pan mode disables node dragging', () => {
