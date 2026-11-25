@@ -13,21 +13,30 @@ from src.adapters.api.routes import (
     presets,
     project_settings,
     projects,
+    providers,
 )
 from src.adapters.media.ffmpeg_media_adapter import FFmpegMediaAdapter
+from src.adapters.providers.http_provider_gateway import HttpProviderGateway
+from src.adapters.security.windows_dpapi_vault import WindowsDpapiVault
+from src.adapters.storage.sqlite_budget_repository import SQLiteBudgetRepository
 from src.adapters.storage.sqlite_channel_repository import SQLiteChannelRepository
 from src.adapters.storage.sqlite_preset_repository import SQLitePresetRepository
 from src.adapters.storage.sqlite_project_asset_repository import SQLiteProjectAssetRepository
 from src.adapters.storage.sqlite_project_media_repository import SQLiteProjectMediaRepository
 from src.adapters.storage.sqlite_project_repository import SQLiteProjectRepository
 from src.adapters.storage.sqlite_project_settings_repository import SQLiteProjectSettingsRepository
+from src.adapters.storage.sqlite_provider_repository import SQLiteProviderRepository
 from src.core.ports.asset_repository import ProjectAssetRepository
+from src.core.ports.budget_repository import BudgetRepository
 from src.core.ports.channel_repository import ChannelRepository
+from src.core.ports.credential_vault import CredentialVaultPort
 from src.core.ports.media_processor import MediaProcessor
 from src.core.ports.preset_repository import PresetRepository
 from src.core.ports.project_media_repository import ProjectMediaRepository
 from src.core.ports.project_repository import ProjectRepository
 from src.core.ports.project_settings_repository import ProjectSettingsRepository
+from src.core.ports.provider_gateway import ProviderGateway
+from src.core.ports.provider_repository import ProviderRepository
 
 
 def get_default_db_path() -> Path:
@@ -51,6 +60,11 @@ def create_app(
     media_repository: Optional[ProjectMediaRepository] = None,
     media_processor: Optional[MediaProcessor] = None,
     media_root: Optional[Union[str, Path]] = None,
+    provider_repository: Optional[ProviderRepository] = None,
+    budget_repository: Optional[BudgetRepository] = None,
+    credential_vault: Optional[CredentialVaultPort] = None,
+    provider_gateway: Optional[ProviderGateway] = None,
+    vault_path: Optional[Union[str, Path]] = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
@@ -93,6 +107,16 @@ def create_app(
     if media_processor is None:
         media_processor = FFmpegMediaAdapter()
 
+    if provider_repository is None:
+        provider_repository = SQLiteProviderRepository(db_path=target_db)
+    if budget_repository is None:
+        budget_repository = SQLiteBudgetRepository(db_path=target_db)
+    if credential_vault is None:
+        resolved_vault_path = Path(vault_path) if vault_path else (target_db.parent / "secrets.vault.json")
+        credential_vault = WindowsDpapiVault(vault_path=resolved_vault_path)
+    if provider_gateway is None:
+        provider_gateway = HttpProviderGateway()
+
     resolved_media_root = Path(media_root) if media_root else (target_db.parent / "media")
     resolved_media_root.mkdir(parents=True, exist_ok=True)
 
@@ -106,6 +130,10 @@ def create_app(
     app.dependency_overrides[media.get_media_repository] = lambda: media_repository
     app.dependency_overrides[media.get_media_processor] = lambda: media_processor
     app.dependency_overrides[media.get_media_root] = lambda: resolved_media_root
+    app.dependency_overrides[providers.get_provider_repository] = lambda: provider_repository
+    app.dependency_overrides[providers.get_budget_repository] = lambda: budget_repository
+    app.dependency_overrides[providers.get_credential_vault] = lambda: credential_vault
+    app.dependency_overrides[providers.get_provider_gateway] = lambda: provider_gateway
 
     # Mount API routers
     app.include_router(health.router, prefix="/api")
@@ -115,5 +143,6 @@ def create_app(
     app.include_router(project_settings.router, prefix="/api")
     app.include_router(assets.router, prefix="/api")
     app.include_router(media.router, prefix="/api")
+    app.include_router(providers.router, prefix="/api")
 
     return app
