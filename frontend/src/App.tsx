@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { WorkflowCanvas } from './components/WorkflowCanvas';
+import { WorkflowCanvas, type WorkspaceTab } from './components/WorkflowCanvas';
 import { Inspector } from './components/Inspector';
 import { ProjectListModal } from './components/ProjectListModal';
 import { CreateProjectDialog } from './components/CreateProjectDialog';
@@ -11,6 +11,7 @@ import {
   getTauriBackendStatus,
   restartTauriBackend,
 } from './api/client';
+import { useProjectMedia } from './hooks/useProjectMedia';
 import { isStageId } from './lib/workflow/stages';
 import type { Project, StageExecutionMode, StageId } from './types';
 import { Loader2, Plus, Sparkles } from 'lucide-react';
@@ -30,11 +31,31 @@ export function App() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
   const [selectedStage, setSelectedStage] = useState('script');
+  const [activeCanvasTab, setActiveCanvasTab] = useState<WorkspaceTab>('workflow');
   const [stageModes, setStageModes] = useState<Partial<Record<StageId, StageExecutionMode>>>({});
+  const media = useProjectMedia(activeProject?.id);
 
   const handleStageModeChange = useCallback((stage: StageId, mode: StageExecutionMode) => {
     setStageModes((prev) => ({ ...prev, [stage]: mode }));
   }, []);
+
+  const handleRunStage = useCallback(
+    (stage: StageId) => {
+      setSelectedStage(stage);
+      if (stage === 'voice' || stage === 'scenes') {
+        setActiveCanvasTab('assets');
+        return;
+      }
+      if (stage === 'edit' || stage === 'export') {
+        void media.triggerExport();
+      }
+    },
+    [media]
+  );
+
+  const handleRunWorkflow = useCallback(() => {
+    void media.triggerExport();
+  }, [media]);
 
   const initBackendAndProjects = useCallback(async (isRetry = false) => {
     if (initializing.current) return;
@@ -94,11 +115,13 @@ export function App() {
     setProjects((prev) => [newProject, ...prev.filter((p) => p.id !== newProject.id)]);
     setActiveProject(newProject);
     setCurrentView('workflow');
+    setActiveCanvasTab('workflow');
   };
 
   const handleSelectProject = (project: Project) => {
     setActiveProject(project);
     setCurrentView('workflow');
+    setActiveCanvasTab('workflow');
   };
 
   return (
@@ -141,9 +164,15 @@ export function App() {
                 onOpenProjectsModal={() => setIsProjectsModalOpen(true)}
                 selectedStage={selectedStage}
                 onSelectStage={setSelectedStage}
+                stageStates={media.stageStates}
                 stageModes={stageModes}
                 onStageModeChange={handleStageModeChange}
+                onRunStage={handleRunStage}
+                onRunWorkflow={handleRunWorkflow}
                 isInspectorOpen={isInspectorOpen}
+                activeTab={activeCanvasTab}
+                onTabChange={setActiveCanvasTab}
+                mediaController={media}
               />
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center canvas-dots">
@@ -187,6 +216,8 @@ export function App() {
                   handleStageModeChange(selectedStage, mode);
                 }
               }}
+              mediaController={media}
+              onOpenMediaTab={(tab) => setActiveCanvasTab(tab)}
             />
           )}
         </>

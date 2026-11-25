@@ -1,6 +1,32 @@
-import type { BackendHealth, CreateProjectPayload, Project } from '../types';
+import type {
+  BackendHealth,
+  CreateProjectPayload,
+  ExportMp4Options,
+  ExportMp4Result,
+  Project,
+  ProjectMediaBundle,
+  ProjectMediaItem,
+} from '../types';
 
 const API_BASE_URL = 'http://127.0.0.1:8000/api';
+
+async function extractErrorDetail(res: Response, fallback: string): Promise<string> {
+  let errorDetail = res.statusText || fallback;
+  try {
+    const data: unknown = await res.json();
+    if (typeof data === 'object' && data !== null && 'detail' in data) {
+      const detail = (data as { detail: unknown }).detail;
+      if (typeof detail === 'string' && detail.trim()) {
+        errorDetail = detail;
+      } else if (detail !== undefined) {
+        errorDetail = JSON.stringify(detail);
+      }
+    }
+  } catch {
+    // ignore json parse error
+  }
+  return errorDetail;
+}
 
 export class ApiError extends Error {
   status?: number;
@@ -112,16 +138,146 @@ export async function createProject(payload: CreateProjectPayload): Promise<Proj
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    let errorDetail = res.statusText;
-    try {
-      const data = await res.json();
-      if (data.detail) {
-        errorDetail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
-      }
-    } catch {
-      // ignore json parse error
-    }
-    throw new ApiError(errorDetail, res.status);
+    throw new ApiError(await extractErrorDetail(res, 'Failed to create project.'), res.status);
   }
-  return await res.json();
+  return (await res.json()) as Project;
+}
+
+export async function getProjectMedia(projectId: string): Promise<ProjectMediaBundle> {
+  const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/media`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    throw new ApiError(await extractErrorDetail(res, 'Failed to load project media.'), res.status);
+  }
+  return (await res.json()) as ProjectMediaBundle;
+}
+
+export async function uploadProjectClip(projectId: string, file: File): Promise<ProjectMediaItem> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/media/clips`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) {
+    throw new ApiError(await extractErrorDetail(res, `Failed to import clip "${file.name}".`), res.status);
+  }
+  return (await res.json()) as ProjectMediaItem;
+}
+
+export async function registerProjectClipPath(
+  projectId: string,
+  sourcePath: string,
+  originalFilename?: string
+): Promise<ProjectMediaItem> {
+  const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/media/clips`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      source_path: sourcePath,
+      original_filename: originalFilename,
+    }),
+  });
+  if (!res.ok) {
+    throw new ApiError(await extractErrorDetail(res, `Failed to register clip "${sourcePath}".`), res.status);
+  }
+  return (await res.json()) as ProjectMediaItem;
+}
+
+export async function uploadProjectAudio(projectId: string, file: File): Promise<ProjectMediaItem> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/media/audio`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) {
+    throw new ApiError(await extractErrorDetail(res, `Failed to import narration "${file.name}".`), res.status);
+  }
+  return (await res.json()) as ProjectMediaItem;
+}
+
+export async function registerProjectAudioPath(
+  projectId: string,
+  sourcePath: string,
+  originalFilename?: string
+): Promise<ProjectMediaItem> {
+  const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/media/audio`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      source_path: sourcePath,
+      original_filename: originalFilename,
+    }),
+  });
+  if (!res.ok) {
+    throw new ApiError(await extractErrorDetail(res, `Failed to register narration "${sourcePath}".`), res.status);
+  }
+  return (await res.json()) as ProjectMediaItem;
+}
+
+export async function reorderProjectClips(
+  projectId: string,
+  clipIds: string[]
+): Promise<{ project_id: string; clips: ProjectMediaItem[] }> {
+  const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/media/clips/order`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ clip_ids: clipIds }),
+  });
+  if (!res.ok) {
+    throw new ApiError(await extractErrorDetail(res, 'Failed to reorder clips.'), res.status);
+  }
+  return (await res.json()) as { project_id: string; clips: ProjectMediaItem[] };
+}
+
+export async function deleteProjectMediaItem(
+  projectId: string,
+  itemId: string
+): Promise<{ deleted: boolean; item_id: string }> {
+  const res = await fetch(
+    `${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/media/${encodeURIComponent(itemId)}`,
+    {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
+    }
+  );
+  if (!res.ok) {
+    throw new ApiError(await extractErrorDetail(res, 'Failed to remove media item.'), res.status);
+  }
+  return (await res.json()) as { deleted: boolean; item_id: string };
+}
+
+export async function exportProjectMp4(
+  projectId: string,
+  options?: ExportMp4Options
+): Promise<ExportMp4Result> {
+  const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/export`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(options ?? {}),
+  });
+  if (!res.ok) {
+    throw new ApiError(await extractErrorDetail(res, 'Failed to export MP4.'), res.status);
+  }
+  return (await res.json()) as ExportMp4Result;
+}
+
+export function getOutputVideoUrl(projectId: string, exportId?: string): string {
+  const base = `${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/output/video`;
+  return exportId ? `${base}?v=${encodeURIComponent(exportId)}` : base;
 }

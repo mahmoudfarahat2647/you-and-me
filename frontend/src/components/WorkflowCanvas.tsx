@@ -18,10 +18,15 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import type { Project, StageExecutionMode, StageId, StageRuntimeState } from '../types';
+import type { ProjectMediaController } from '../hooks/useProjectMedia';
 import { WORKFLOW_STAGES } from '../lib/workflow/stages';
 import { Button } from './ui/button';
 import { AgentNodeCardNode, type AgentNodeCardFlowNode } from './workflow/AgentNodeCardNode';
 import { useWorkflowController } from './workflow/useWorkflowController';
+import { MediaAssetsPanel } from './media/MediaAssetsPanel';
+import { OutputPlaybackPanel } from './media/OutputPlaybackPanel';
+
+export type WorkspaceTab = 'workflow' | 'assets' | 'output' | 'logs';
 
 interface WorkflowCanvasProps {
   project: Project;
@@ -36,6 +41,9 @@ interface WorkflowCanvasProps {
   onRunStage?: (stage: StageId) => void;
   onRunWorkflow?: () => void;
   isInspectorOpen?: boolean;
+  activeTab?: WorkspaceTab;
+  onTabChange?: (tab: WorkspaceTab) => void;
+  mediaController?: ProjectMediaController;
 }
 
 const nodeTypes = {
@@ -206,8 +214,19 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   onRunStage,
   onRunWorkflow,
   isInspectorOpen = true,
+  activeTab: controlledActiveTab,
+  onTabChange,
+  mediaController,
 }) => {
-  const [activeTab, setActiveTab] = useState<'workflow' | 'assets' | 'output' | 'logs'>('workflow');
+  const [localActiveTab, setLocalActiveTab] = useState<WorkspaceTab>('workflow');
+  const activeTab = controlledActiveTab ?? localActiveTab;
+  const setActiveTab = (tab: WorkspaceTab) => {
+    if (onTabChange) {
+      onTabChange(tab);
+    } else {
+      setLocalActiveTab(tab);
+    }
+  };
   const [localModes, setLocalModes] = useState<Partial<Record<StageId, StageExecutionMode>>>({});
   const [localToggles, setLocalToggles] = useState<Partial<Record<StageId, Record<string, boolean>>>>({});
   const [localRunStates, setLocalRunStates] = useState<Partial<Record<StageId, StageRuntimeState>>>({});
@@ -404,19 +423,100 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         </div>
       </div>
 
-      {/* Main Canvas View */}
-      <ReactFlowProvider>
-        <WorkflowSurface
-          selectedStage={selectedStage}
-          onSelectStage={onSelectStage}
-          stageStates={effectiveStageStates}
-          stageToggles={localToggles}
-          onRunStage={handleRunStage}
-          onToggleStageAuto={handleToggleStageAuto}
-          onToggleStageOption={handleToggleStageOption}
-          isInspectorOpen={isInspectorOpen}
+      {/* Main Workspace View */}
+      {activeTab === 'workflow' && (
+        <ReactFlowProvider>
+          <WorkflowSurface
+            selectedStage={selectedStage}
+            onSelectStage={onSelectStage}
+            stageStates={effectiveStageStates}
+            stageToggles={localToggles}
+            onRunStage={handleRunStage}
+            onToggleStageAuto={handleToggleStageAuto}
+            onToggleStageOption={handleToggleStageOption}
+            isInspectorOpen={isInspectorOpen}
+          />
+        </ReactFlowProvider>
+      )}
+
+      {activeTab === 'assets' && mediaController && (
+        <MediaAssetsPanel
+          clips={mediaController.clips}
+          audio={mediaController.audio}
+          latestExport={mediaController.latestExport}
+          isImportingClip={mediaController.isImportingClip}
+          isImportingAudio={mediaController.isImportingAudio}
+          isExporting={mediaController.isExporting}
+          scenesError={mediaController.scenesError}
+          voiceError={mediaController.voiceError}
+          exportError={mediaController.exportError}
+          onImportClipFiles={mediaController.importClipFiles}
+          onImportClipPath={mediaController.importClipPath}
+          onImportAudioFile={mediaController.importAudioFile}
+          onImportAudioPath={mediaController.importAudioPath}
+          onMoveClip={mediaController.moveClip}
+          onRemoveItem={mediaController.removeItem}
+          onExportMp4={async () => {
+            await mediaController.triggerExport();
+          }}
+          onOpenOutput={() => setActiveTab('output')}
         />
-      </ReactFlowProvider>
+      )}
+
+      {activeTab === 'assets' && !mediaController && (
+        <div className="flex-1 flex items-center justify-center p-8 text-xs text-neutral-400">
+          Media assets manager is not connected.
+        </div>
+      )}
+
+      {activeTab === 'output' && mediaController && (
+        <OutputPlaybackPanel
+          latestExport={mediaController.latestExport}
+          videoUrl={mediaController.videoUrl}
+          isExporting={mediaController.isExporting}
+          canExport={mediaController.clips.length >= 1 && mediaController.audio !== null}
+          exportError={mediaController.exportError}
+          onExportMp4={async () => {
+            await mediaController.triggerExport();
+          }}
+          onGoToAssets={() => setActiveTab('assets')}
+        />
+      )}
+
+      {activeTab === 'output' && !mediaController && (
+        <div className="flex-1 flex items-center justify-center p-8 text-xs text-neutral-400">
+          No exported video output available.
+        </div>
+      )}
+
+      {activeTab === 'logs' && (
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="max-w-4xl mx-auto rounded-xl border border-[#2e2e2e] bg-[#202020] p-4 font-mono text-xs">
+            {mediaController && mediaController.logs.length > 0 ? (
+              <ul className="space-y-2">
+                {mediaController.logs.map((entry) => (
+                  <li
+                    key={entry.id}
+                    className={`flex items-start gap-3 rounded-lg border px-3 py-2 ${
+                      entry.level === 'error'
+                        ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                        : 'border-[#2e2e2e] bg-[#191919] text-neutral-300'
+                    }`}
+                  >
+                    <span className="text-neutral-500 shrink-0">{entry.timestamp}</span>
+                    <span className="uppercase text-[10px] px-1.5 py-0.5 rounded bg-[#282828] text-neutral-300 shrink-0">
+                      {entry.stage}
+                    </span>
+                    <span className="break-all">{entry.message}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-neutral-400">No logs available yet.</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

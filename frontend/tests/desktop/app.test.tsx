@@ -10,6 +10,20 @@ vi.mock('../../src/api/client', () => ({
   listProjects: vi.fn(() => new Promise(() => {})),
   getTauriBackendStatus: vi.fn().mockResolvedValue(null),
   restartTauriBackend: vi.fn().mockResolvedValue(null),
+  getProjectMedia: vi.fn().mockResolvedValue({
+    project_id: 'proj-1',
+    clips: [],
+    audio: null,
+    latest_export: null,
+  }),
+  uploadProjectClip: vi.fn(),
+  registerProjectClipPath: vi.fn(),
+  uploadProjectAudio: vi.fn(),
+  registerProjectAudioPath: vi.fn(),
+  reorderProjectClips: vi.fn(),
+  deleteProjectMediaItem: vi.fn(),
+  exportProjectMp4: vi.fn(),
+  getOutputVideoUrl: vi.fn((projectId: string) => `http://127.0.0.1:8000/api/projects/${projectId}/output/video`),
 }));
 
 it('stays in the connecting state until projects have loaded', async () => {

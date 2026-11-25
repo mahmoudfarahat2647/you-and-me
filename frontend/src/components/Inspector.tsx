@@ -11,7 +11,10 @@ import {
   PanelRightOpen,
 } from 'lucide-react';
 import { getStageDefinition, isStageId } from '../lib/workflow/stages';
+import { formatFileSize, formatMediaDuration } from '../lib/media/mediaStageState';
+import type { ProjectMediaController } from '../hooks/useProjectMedia';
 import type { StageExecutionMode } from '../types';
+import { Button } from './ui/button';
 
 interface InspectorProps {
   onClose?: () => void;
@@ -20,6 +23,8 @@ interface InspectorProps {
   selectedStage?: string;
   stageMode?: StageExecutionMode;
   onStageModeChange?: (mode: StageExecutionMode) => void;
+  mediaController?: ProjectMediaController;
+  onOpenMediaTab?: (tab: 'assets' | 'output') => void;
 }
 
 export const Inspector: React.FC<InspectorProps> = ({
@@ -29,6 +34,8 @@ export const Inspector: React.FC<InspectorProps> = ({
   selectedStage = 'script',
   stageMode,
   onStageModeChange,
+  mediaController,
+  onOpenMediaTab,
 }) => {
   const [activeTab, setActiveTab] = useState<'settings' | 'output' | 'logs'>('settings');
   const [localMode, setLocalMode] = useState<StageExecutionMode>('auto');
@@ -305,18 +312,123 @@ export const Inspector: React.FC<InspectorProps> = ({
                 </div>
               )}
             </div>
+            {/* Media & Export Summary for Voice/Scenes/Edit/Export */}
+            {mediaController && (stage.id === 'voice' || stage.id === 'scenes' || stage.id === 'edit' || stage.id === 'export') && (
+              <div className="pt-3 border-t border-[#2e2e2e] space-y-2">
+                <span className="block text-[11px] font-medium text-neutral-400">
+                  Local Media & Export
+                </span>
+                <div className="rounded-lg border border-[#2e2e2e] bg-[#191919] p-2.5 text-[11px] space-y-1.5 text-neutral-300">
+                  {stage.id === 'voice' && (
+                    <p>
+                      {mediaController.audio
+                        ? `Narration: ${mediaController.audio.original_filename} (${formatMediaDuration(mediaController.audio.duration_seconds)})`
+                        : 'No narration audio imported yet.'}
+                    </p>
+                  )}
+                  {stage.id === 'scenes' && (
+                    <p>
+                      {mediaController.clips.length > 0
+                        ? `${mediaController.clips.length} video clip(s) ordered`
+                        : 'No moving video clips imported yet.'}
+                    </p>
+                  )}
+                  {(stage.id === 'edit' || stage.id === 'export') && (
+                    <p>
+                      {mediaController.latestExport
+                        ? `Latest MP4: ${mediaController.latestExport.width}x${mediaController.latestExport.height} · ${formatFileSize(mediaController.latestExport.file_size_bytes)}`
+                        : `${mediaController.clips.length} clip(s), ${mediaController.audio ? 'audio ready' : 'no audio'}`}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {onOpenMediaTab && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onOpenMediaTab('assets')}
+                        className="h-7 text-[11px]"
+                      >
+                        Manage Assets
+                      </Button>
+                    )}
+                    {(stage.id === 'edit' || stage.id === 'export') && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="workflow"
+                        disabled={mediaController.isExporting || mediaController.clips.length === 0 || mediaController.audio === null}
+                        onClick={() => void mediaController.triggerExport()}
+                        className="h-7 text-[11px]"
+                      >
+                        {mediaController.isExporting ? 'Exporting…' : 'Export MP4'}
+                      </Button>
+                    )}
+                    {mediaController.latestExport && onOpenMediaTab && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => onOpenMediaTab('output')}
+                        className="h-7 text-[11px]"
+                      >
+                        View Output
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {activeTab === 'output' && (
-          <div className="p-4 text-xs text-neutral-400">
-            <p className="italic text-neutral-500">No output generated yet for this stage.</p>
+          <div className="p-4 text-xs text-neutral-400 space-y-2">
+            {mediaController?.latestExport && (stage.id === 'edit' || stage.id === 'export') ? (
+              <div className="rounded-lg border border-[#2e2e2e] bg-[#191919] p-3 space-y-1.5 text-neutral-200">
+                <p className="font-medium text-emerald-400">MP4 Ready</p>
+                <p className="font-mono text-[11px] text-neutral-400">
+                  {formatMediaDuration(mediaController.latestExport.duration_seconds)} · {mediaController.latestExport.width}x{mediaController.latestExport.height}
+                </p>
+                {onOpenMediaTab && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => onOpenMediaTab('output')}
+                    className="mt-1 h-7 text-[11px]"
+                  >
+                    Open Video Player
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <p className="italic text-neutral-500">No output generated yet for this stage.</p>
+            )}
           </div>
         )}
 
         {activeTab === 'logs' && (
-          <div className="p-4 text-xs font-mono text-neutral-400">
-            <p className="text-neutral-500">No logs available yet for this stage.</p>
+          <div className="p-4 text-xs font-mono text-neutral-400 space-y-2">
+            {(() => {
+              const stageLogs = mediaController?.logs.filter((l) => l.stage === stage.id) ?? [];
+              if (stageLogs.length === 0) {
+                return <p className="text-neutral-500">No logs available yet for this stage.</p>;
+              }
+              return stageLogs.map((entry) => (
+                <div
+                  key={entry.id}
+                  className={`rounded border p-2 text-[11px] ${
+                    entry.level === 'error'
+                      ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                      : 'border-[#2e2e2e] bg-[#191919] text-neutral-300'
+                  }`}
+                >
+                  <span className="block text-[10px] text-neutral-500">{entry.timestamp}</span>
+                  <span className="break-all">{entry.message}</span>
+                </div>
+              ));
+            })()}
           </div>
         )}
       </div>
