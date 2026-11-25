@@ -12,7 +12,7 @@ import {
   ChevronDown,
   Plus,
 } from 'lucide-react';
-import type { Project } from '../types';
+import type { ChannelProfile, Project } from '../types';
 
 interface SidebarProps {
   currentView: string;
@@ -22,6 +22,9 @@ interface SidebarProps {
   onSelectProject: (project: Project) => void;
   onOpenProjectsModal: () => void;
   onOpenCreateDialog: () => void;
+  channels?: ChannelProfile[];
+  activeChannelId?: string | null;
+  onSelectActiveChannel?: (channelId: string | null) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -32,6 +35,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectProject,
   onOpenProjectsModal,
   onOpenCreateDialog,
+  channels = [],
+  activeChannelId = null,
+  onSelectActiveChannel,
 }) => {
   const recentProjects = projects.slice(0, 5);
 
@@ -81,10 +87,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           <button
             onClick={() => onSelectView('channels')}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 hover:bg-[#252525] transition-colors"
+            className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              currentView === 'channels'
+                ? 'bg-[#282828] text-neutral-100'
+                : 'text-neutral-400 hover:text-neutral-200 hover:bg-[#252525]'
+            }`}
           >
-            <Tv className="h-4 w-4" />
-            <span>Channels</span>
+            <div className="flex items-center gap-2.5">
+              <Tv className="h-4 w-4" />
+              <span>Channels</span>
+            </div>
+            {channels.length > 0 && (
+              <span className="text-[10px] bg-[#282828] px-1.5 py-0.2 rounded text-neutral-400">
+                {channels.length}
+              </span>
+            )}
           </button>
 
           <button
@@ -111,6 +128,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>Settings</span>
           </button>
         </nav>
+
+        {/* Active Channel Switcher */}
+        {channels.length > 0 && onSelectActiveChannel && (
+          <div className="mt-2 px-3">
+            <label
+              htmlFor="sidebar-active-channel"
+              className="block px-2 py-1 text-[11px] font-medium text-neutral-400"
+            >
+              Active Channel
+            </label>
+            <select
+              id="sidebar-active-channel"
+              aria-label="Active Channel"
+              value={activeChannelId ?? ''}
+              onChange={(e) => onSelectActiveChannel(e.target.value || null)}
+              className="w-full rounded-lg border border-[#2e2e2e] bg-[#191919] px-2.5 py-1.5 text-xs text-neutral-200 focus:border-emerald-500/50 focus:outline-none"
+            >
+              <option value="">All Channels</option>
+              {channels.map((channel) => (
+                <option key={channel.id} value={channel.id}>
+                  {channel.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Recent Projects Section */}
         <div className="mt-4 px-3">

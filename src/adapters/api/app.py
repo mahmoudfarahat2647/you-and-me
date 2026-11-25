@@ -5,9 +5,24 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.adapters.api.routes import health, projects
+from src.adapters.api.routes import (
+    assets,
+    channels,
+    health,
+    presets,
+    project_settings,
+    projects,
+)
+from src.adapters.storage.sqlite_channel_repository import SQLiteChannelRepository
+from src.adapters.storage.sqlite_preset_repository import SQLitePresetRepository
+from src.adapters.storage.sqlite_project_asset_repository import SQLiteProjectAssetRepository
 from src.adapters.storage.sqlite_project_repository import SQLiteProjectRepository
+from src.adapters.storage.sqlite_project_settings_repository import SQLiteProjectSettingsRepository
+from src.core.ports.asset_repository import ProjectAssetRepository
+from src.core.ports.channel_repository import ChannelRepository
+from src.core.ports.preset_repository import PresetRepository
 from src.core.ports.project_repository import ProjectRepository
+from src.core.ports.project_settings_repository import ProjectSettingsRepository
 
 
 def get_default_db_path() -> Path:
@@ -24,6 +39,10 @@ def get_default_db_path() -> Path:
 def create_app(
     repository: Optional[ProjectRepository] = None,
     db_path: Optional[str] = None,
+    channel_repository: Optional[ChannelRepository] = None,
+    preset_repository: Optional[PresetRepository] = None,
+    settings_repository: Optional[ProjectSettingsRepository] = None,
+    asset_repository: Optional[ProjectAssetRepository] = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
@@ -41,15 +60,37 @@ def create_app(
         allow_headers=["*"],
     )
 
-    # Configure repository dependency
+    if db_path is not None:
+        target_db = Path(db_path)
+    elif isinstance(repository, SQLiteProjectRepository):
+        target_db = Path(repository.db_path)
+    else:
+        target_db = get_default_db_path()
+
     if repository is None:
-        target_db = Path(db_path) if db_path else get_default_db_path()
         repository = SQLiteProjectRepository(db_path=target_db)
+    if channel_repository is None:
+        channel_repository = SQLiteChannelRepository(db_path=target_db)
+    if preset_repository is None:
+        preset_repository = SQLitePresetRepository(db_path=target_db)
+    if settings_repository is None:
+        settings_repository = SQLiteProjectSettingsRepository(db_path=target_db)
+    if asset_repository is None:
+        asset_repository = SQLiteProjectAssetRepository(db_path=target_db)
 
     app.dependency_overrides[projects.get_repository] = lambda: repository
+    app.dependency_overrides[projects.get_settings_repository_for_projects] = lambda: settings_repository
+    app.dependency_overrides[channels.get_channel_repository] = lambda: channel_repository
+    app.dependency_overrides[presets.get_preset_repository] = lambda: preset_repository
+    app.dependency_overrides[project_settings.get_project_settings_repository] = lambda: settings_repository
+    app.dependency_overrides[assets.get_asset_repository] = lambda: asset_repository
 
     # Mount API routers
     app.include_router(health.router, prefix="/api")
     app.include_router(projects.router, prefix="/api")
+    app.include_router(channels.router, prefix="/api")
+    app.include_router(presets.router, prefix="/api")
+    app.include_router(project_settings.router, prefix="/api")
+    app.include_router(assets.router, prefix="/api")
 
     return app

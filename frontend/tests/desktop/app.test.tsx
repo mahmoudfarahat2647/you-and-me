@@ -8,6 +8,15 @@ import { checkBackendHealth } from '../../src/api/client';
 vi.mock('../../src/api/client', () => ({
   checkBackendHealth: vi.fn().mockResolvedValue({ status: 'ok', app: 'test', version: '1' }),
   listProjects: vi.fn(() => new Promise(() => {})),
+  listChannels: vi.fn().mockResolvedValue([]),
+  listPresets: vi.fn().mockResolvedValue([]),
+  getProjectSettings: vi.fn().mockResolvedValue(null),
+  listProjectAssets: vi.fn().mockResolvedValue([]),
+  createChannel: vi.fn(),
+  updateChannel: vi.fn(),
+  updateProjectSettings: vi.fn(),
+  createProjectAsset: vi.fn(),
+  deleteProjectAsset: vi.fn(),
   getTauriBackendStatus: vi.fn().mockResolvedValue(null),
   restartTauriBackend: vi.fn().mockResolvedValue(null),
 }));
