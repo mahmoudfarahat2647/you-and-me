@@ -30,6 +30,12 @@ vi.mock('../../src/api/client', async () => {
     listProjectAssets: vi.fn(),
     createProjectAsset: vi.fn(),
     deleteProjectAsset: vi.fn(),
+    getProjectMedia: vi.fn().mockResolvedValue({
+      project_id: '',
+      clips: [],
+      audio: null,
+      latest_export: null,
+    }),
   };
 });
 

@@ -108,25 +108,33 @@ export function useWorkflowController({
   const nodes = useMemo<AgentNodeCardFlowNode[]>(
     () =>
       WORKFLOW_STAGES.map((stage, index) => {
-        const runtimeInput: StageRuntimeState | undefined =
-          stageStates?.[stage.id] ??
-          (projectSettings?.stage_modes?.[stage.id]
-            ? { status: 'pending', mode: projectSettings.stage_modes[stage.id] }
-            : undefined);
-        const mapped = mapStageRuntimeState(runtimeInput);
-        const Icon = stage.icon;
-        const previous = index > 0 ? WORKFLOW_STAGES[index - 1] : null;
-        const next = index < WORKFLOW_STAGES.length - 1 ? WORKFLOW_STAGES[index + 1] : null;
+        const rawStageState = stageStates?.[stage.id];
         const stageAssetType = STAGE_ASSET_TYPE[stage.id];
         const stageAssetCount =
           stageAssetType && projectAssets
             ? projectAssets.filter((asset) => asset.asset_type === stageAssetType).length
             : 0;
+        const isIdleMediaPlaceholder =
+          rawStageState?.status === 'pending' &&
+          rawStageState.footer !== undefined &&
+          (rawStageState.footer.startsWith('Waiting for') || rawStageState.footer.startsWith('Needs '));
+        const baseRuntime =
+          rawStageState ??
+          (projectSettings?.stage_modes?.[stage.id]
+            ? { status: 'pending' as const, mode: projectSettings.stage_modes[stage.id] }
+            : undefined);
+        const runtimeInput: StageRuntimeState | undefined =
+          baseRuntime && stageAssetCount > 0 && isIdleMediaPlaceholder
+            ? { ...baseRuntime, footer: undefined }
+            : baseRuntime;
+        const mapped = mapStageRuntimeState(runtimeInput);
+        const Icon = stage.icon;
+        const previous = index > 0 ? WORKFLOW_STAGES[index - 1] : null;
+        const next = index < WORKFLOW_STAGES.length - 1 ? WORKFLOW_STAGES[index + 1] : null;
         const footerSummary =
-          stageStates?.[stage.id]?.footer ??
-          (stageAssetCount > 0
+          stageAssetCount > 0 && !(rawStageState?.footer && !isIdleMediaPlaceholder)
             ? `${mapped.footer} · ${stageAssetCount} ${stageAssetCount === 1 ? 'asset' : 'assets'}`
-            : mapped.footer);
+            : mapped.footer;
 
         const toggles: AgentNodeToggleItem[] = stage.toggles.map((toggle) => {
           if (toggle.kind === 'autoMode') {

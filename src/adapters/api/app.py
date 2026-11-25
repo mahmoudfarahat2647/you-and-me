@@ -1,7 +1,7 @@
 """FastAPI application factory for the local desktop backend adapter."""
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,18 +9,23 @@ from src.adapters.api.routes import (
     assets,
     channels,
     health,
+    media,
     presets,
     project_settings,
     projects,
 )
+from src.adapters.media.ffmpeg_media_adapter import FFmpegMediaAdapter
 from src.adapters.storage.sqlite_channel_repository import SQLiteChannelRepository
 from src.adapters.storage.sqlite_preset_repository import SQLitePresetRepository
 from src.adapters.storage.sqlite_project_asset_repository import SQLiteProjectAssetRepository
+from src.adapters.storage.sqlite_project_media_repository import SQLiteProjectMediaRepository
 from src.adapters.storage.sqlite_project_repository import SQLiteProjectRepository
 from src.adapters.storage.sqlite_project_settings_repository import SQLiteProjectSettingsRepository
 from src.core.ports.asset_repository import ProjectAssetRepository
 from src.core.ports.channel_repository import ChannelRepository
+from src.core.ports.media_processor import MediaProcessor
 from src.core.ports.preset_repository import PresetRepository
+from src.core.ports.project_media_repository import ProjectMediaRepository
 from src.core.ports.project_repository import ProjectRepository
 from src.core.ports.project_settings_repository import ProjectSettingsRepository
 
@@ -43,6 +48,9 @@ def create_app(
     preset_repository: Optional[PresetRepository] = None,
     settings_repository: Optional[ProjectSettingsRepository] = None,
     asset_repository: Optional[ProjectAssetRepository] = None,
+    media_repository: Optional[ProjectMediaRepository] = None,
+    media_processor: Optional[MediaProcessor] = None,
+    media_root: Optional[Union[str, Path]] = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
@@ -62,11 +70,12 @@ def create_app(
 
     if db_path is not None:
         target_db = Path(db_path)
-    elif isinstance(repository, SQLiteProjectRepository):
-        target_db = Path(repository.db_path)
+    elif repository is not None and hasattr(repository, "db_path"):
+        target_db = Path(getattr(repository, "db_path"))
     else:
         target_db = get_default_db_path()
 
+    # Configure repository dependencies
     if repository is None:
         repository = SQLiteProjectRepository(db_path=target_db)
     if channel_repository is None:
@@ -78,12 +87,25 @@ def create_app(
     if asset_repository is None:
         asset_repository = SQLiteProjectAssetRepository(db_path=target_db)
 
+    if media_repository is None:
+        media_repository = SQLiteProjectMediaRepository(db_path=target_db)
+
+    if media_processor is None:
+        media_processor = FFmpegMediaAdapter()
+
+    resolved_media_root = Path(media_root) if media_root else (target_db.parent / "media")
+    resolved_media_root.mkdir(parents=True, exist_ok=True)
+
     app.dependency_overrides[projects.get_repository] = lambda: repository
     app.dependency_overrides[projects.get_settings_repository_for_projects] = lambda: settings_repository
     app.dependency_overrides[channels.get_channel_repository] = lambda: channel_repository
     app.dependency_overrides[presets.get_preset_repository] = lambda: preset_repository
     app.dependency_overrides[project_settings.get_project_settings_repository] = lambda: settings_repository
     app.dependency_overrides[assets.get_asset_repository] = lambda: asset_repository
+    app.dependency_overrides[media.get_project_repository] = lambda: repository
+    app.dependency_overrides[media.get_media_repository] = lambda: media_repository
+    app.dependency_overrides[media.get_media_processor] = lambda: media_processor
+    app.dependency_overrides[media.get_media_root] = lambda: resolved_media_root
 
     # Mount API routers
     app.include_router(health.router, prefix="/api")
@@ -92,5 +114,6 @@ def create_app(
     app.include_router(presets.router, prefix="/api")
     app.include_router(project_settings.router, prefix="/api")
     app.include_router(assets.router, prefix="/api")
+    app.include_router(media.router, prefix="/api")
 
     return app

@@ -6,8 +6,12 @@ import type {
   CreatePresetPayload,
   CreateProjectAssetPayload,
   CreateProjectPayload,
+  ExportMp4Options,
+  ExportMp4Result,
   Project,
   ProjectAsset,
+  ProjectMediaBundle,
+  ProjectMediaItem,
   ProjectSettings,
   UpdateChannelPayload,
   UpdateProjectSettingsPayload,
@@ -59,12 +63,18 @@ export async function restartTauriBackend(): Promise<BackendProcessInfo | null> 
   return null;
 }
 
-async function parseErrorDetail(res: Response): Promise<string> {
-  let errorDetail = res.statusText || `HTTP ${res.status}`;
+async function parseErrorDetail(res: Response, fallback?: string): Promise<string> {
+  let errorDetail = res.statusText || fallback || `HTTP ${res.status}`;
   try {
     const data: unknown = await res.json();
     if (typeof data === 'object' && data !== null && 'detail' in data && data.detail !== undefined) {
-      errorDetail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+      if (typeof data.detail === 'string') {
+        if (data.detail.trim()) {
+          errorDetail = data.detail;
+        }
+      } else {
+        errorDetail = JSON.stringify(data.detail);
+      }
     }
   } catch {
     // ignore json parse error
@@ -72,7 +82,7 @@ async function parseErrorDetail(res: Response): Promise<string> {
   return errorDetail;
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function requestJson<T>(path: string, init?: RequestInit, fallbackError?: string): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
@@ -82,7 +92,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    throw new ApiError(await parseErrorDetail(res), res.status);
+    throw new ApiError(await parseErrorDetail(res, fallbackError), res.status);
   }
   return (await res.json()) as T;
 }
@@ -151,7 +161,7 @@ export async function createProject(payload: CreateProjectPayload): Promise<Proj
   return requestJson<Project>('/projects', {
     method: 'POST',
     body: JSON.stringify(payload),
-  });
+  }, 'Failed to create project.');
 }
 
 export async function listChannels(): Promise<ChannelProfile[]> {
@@ -244,4 +254,118 @@ export async function deleteProjectAsset(
     `/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
     { method: 'DELETE' }
   );
+}
+
+export async function getProjectMedia(projectId: string): Promise<ProjectMediaBundle> {
+  return requestJson<ProjectMediaBundle>(
+    `/projects/${encodeURIComponent(projectId)}/media`,
+    { method: 'GET' },
+    'Failed to load project media.'
+  );
+}
+
+export async function uploadProjectClip(projectId: string, file: File): Promise<ProjectMediaItem> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/media/clips`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) {
+    throw new ApiError(await parseErrorDetail(res, `Failed to import clip "${file.name}".`), res.status);
+  }
+  return (await res.json()) as ProjectMediaItem;
+}
+
+export async function registerProjectClipPath(
+  projectId: string,
+  sourcePath: string,
+  originalFilename?: string
+): Promise<ProjectMediaItem> {
+  return requestJson<ProjectMediaItem>(
+    `/projects/${encodeURIComponent(projectId)}/media/clips`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        source_path: sourcePath,
+        original_filename: originalFilename,
+      }),
+    },
+    `Failed to register clip "${sourcePath}".`
+  );
+}
+
+export async function uploadProjectAudio(projectId: string, file: File): Promise<ProjectMediaItem> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/media/audio`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) {
+    throw new ApiError(await parseErrorDetail(res, `Failed to import narration "${file.name}".`), res.status);
+  }
+  return (await res.json()) as ProjectMediaItem;
+}
+
+export async function registerProjectAudioPath(
+  projectId: string,
+  sourcePath: string,
+  originalFilename?: string
+): Promise<ProjectMediaItem> {
+  return requestJson<ProjectMediaItem>(
+    `/projects/${encodeURIComponent(projectId)}/media/audio`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        source_path: sourcePath,
+        original_filename: originalFilename,
+      }),
+    },
+    `Failed to register narration "${sourcePath}".`
+  );
+}
+
+export async function reorderProjectClips(
+  projectId: string,
+  clipIds: string[]
+): Promise<{ project_id: string; clips: ProjectMediaItem[] }> {
+  return requestJson<{ project_id: string; clips: ProjectMediaItem[] }>(
+    `/projects/${encodeURIComponent(projectId)}/media/clips/order`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ clip_ids: clipIds }),
+    },
+    'Failed to reorder clips.'
+  );
+}
+
+export async function deleteProjectMediaItem(
+  projectId: string,
+  itemId: string
+): Promise<{ deleted: boolean; item_id: string }> {
+  return requestJson<{ deleted: boolean; item_id: string }>(
+    `/projects/${encodeURIComponent(projectId)}/media/${encodeURIComponent(itemId)}`,
+    { method: 'DELETE' },
+    'Failed to remove media item.'
+  );
+}
+
+export async function exportProjectMp4(
+  projectId: string,
+  options?: ExportMp4Options
+): Promise<ExportMp4Result> {
+  return requestJson<ExportMp4Result>(
+    `/projects/${encodeURIComponent(projectId)}/export`,
+    {
+      method: 'POST',
+      body: JSON.stringify(options ?? {}),
+    },
+    'Failed to export MP4.'
+  );
+}
+
+export function getOutputVideoUrl(projectId: string, exportId?: string): string {
+  const base = `${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/output/video`;
+  return exportId ? `${base}?v=${encodeURIComponent(exportId)}` : base;
 }

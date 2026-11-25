@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { WorkflowCanvas } from './components/WorkflowCanvas';
+import { WorkflowCanvas, type WorkspaceTab } from './components/WorkflowCanvas';
 import { Inspector } from './components/Inspector';
 import { ProjectListModal } from './components/ProjectListModal';
 import { CreateProjectDialog } from './components/CreateProjectDialog';
@@ -21,6 +21,7 @@ import {
   updateChannel,
   updateProjectSettings,
 } from './api/client';
+import { useProjectMedia } from './hooks/useProjectMedia';
 import { isStageId } from './lib/workflow/stages';
 import type {
   ChannelProfile,
@@ -58,6 +59,9 @@ export function App() {
   const [createDialogChannelId, setCreateDialogChannelId] = useState<string | null>(null);
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
   const [selectedStage, setSelectedStage] = useState('script');
+  const [activeCanvasTab, setActiveCanvasTab] = useState<WorkspaceTab>('workflow');
+  const [localStageModes, setLocalStageModes] = useState<Partial<Record<StageId, StageExecutionMode>>>({});
+  const media = useProjectMedia(activeProject?.id);
 
   const activeProjectIdRef = useRef<string | null>(null);
 
@@ -75,6 +79,7 @@ export function App() {
     activeProjectIdRef.current = projectId;
     setActiveProjectSettings(null);
     setActiveProjectAssets([]);
+    setLocalStageModes({});
     if (!projectId) return;
 
     try {
@@ -83,8 +88,8 @@ export function App() {
         listProjectAssets(projectId),
       ]);
       if (activeProjectIdRef.current !== projectId) return;
-      setActiveProjectSettings(settings);
-      setActiveProjectAssets(assets);
+      setActiveProjectSettings(settings ?? null);
+      setActiveProjectAssets(Array.isArray(assets) ? assets : []);
     } catch (err) {
       console.warn('Could not load project settings/assets:', err);
     }
@@ -93,6 +98,24 @@ export function App() {
   useEffect(() => {
     void loadProjectContext(activeProject?.id ?? null);
   }, [activeProject?.id, loadProjectContext]);
+
+  const handleRunStage = useCallback(
+    (stage: StageId) => {
+      setSelectedStage(stage);
+      if (stage === 'voice' || stage === 'scenes') {
+        setActiveCanvasTab('assets');
+        return;
+      }
+      if (stage === 'edit' || stage === 'export') {
+        void media.triggerExport();
+      }
+    },
+    [media]
+  );
+
+  const handleRunWorkflow = useCallback(() => {
+    void media.triggerExport();
+  }, [media]);
 
   const initBackendAndProjects = useCallback(async (isRetry = false) => {
     if (initializing.current) return;
@@ -189,11 +212,13 @@ export function App() {
     }
     setActiveProject(newProject);
     setCurrentView('workflow');
+    setActiveCanvasTab('workflow');
   };
 
   const handleSelectProject = (project: Project) => {
     setActiveProject(project);
     setCurrentView('workflow');
+    setActiveCanvasTab('workflow');
   };
 
   const handleUpdateProjectSettings = useCallback(
@@ -212,17 +237,21 @@ export function App() {
     (stage: StageId, mode: StageExecutionMode) => {
       if (!activeProject) return;
       const targetProjectId = activeProject.id;
-      setActiveProjectSettings((prev) =>
-        prev && prev.project_id === targetProjectId
-          ? {
-              ...prev,
-              stage_modes: { ...prev.stage_modes, [stage]: mode },
-            }
-          : prev
-      );
-      void handleUpdateProjectSettings({ stage_modes: { [stage]: mode } });
+      if (activeProjectSettings && activeProjectSettings.project_id === targetProjectId) {
+        setActiveProjectSettings((prev) =>
+          prev && prev.project_id === targetProjectId
+            ? {
+                ...prev,
+                stage_modes: { ...prev.stage_modes, [stage]: mode },
+              }
+            : prev
+        );
+        void handleUpdateProjectSettings({ stage_modes: { [stage]: mode } });
+      } else {
+        setLocalStageModes((prev) => ({ ...prev, [stage]: mode }));
+      }
     },
-    [activeProject, handleUpdateProjectSettings]
+    [activeProject, activeProjectSettings, handleUpdateProjectSettings]
   );
 
   const handleCreateAsset = useCallback(
@@ -256,7 +285,7 @@ export function App() {
     setIsCreateDialogOpen(true);
   };
 
-  const stageModes = activeProjectSettings?.stage_modes;
+  const stageModes = activeProjectSettings?.stage_modes ?? localStageModes;
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#191919] text-neutral-100 antialiased font-sans">
@@ -313,14 +342,20 @@ export function App() {
                 onOpenProjectsModal={() => setIsProjectsModalOpen(true)}
                 selectedStage={selectedStage}
                 onSelectStage={setSelectedStage}
+                stageStates={media.stageStates}
                 stageModes={stageModes}
                 onStageModeChange={handleStageModeChange}
+                onRunStage={handleRunStage}
+                onRunWorkflow={handleRunWorkflow}
                 isInspectorOpen={isInspectorOpen}
                 projectSettings={activeProjectSettings}
                 projectAssets={activeProjectAssets}
                 onCreateAsset={handleCreateAsset}
                 onDeleteAsset={handleDeleteAsset}
                 activeChannel={activeChannel}
+                activeTab={activeCanvasTab}
+                onTabChange={setActiveCanvasTab}
+                mediaController={media}
               />
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center canvas-dots">
@@ -371,6 +406,8 @@ export function App() {
               projectSettings={activeProjectSettings}
               onUpdateSettings={handleUpdateProjectSettings}
               projectAssets={activeProjectAssets}
+              mediaController={media}
+              onOpenMediaTab={(tab) => setActiveCanvasTab(tab)}
             />
           )}
         </>
