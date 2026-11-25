@@ -18,6 +18,7 @@ class Project:
     created_at: datetime
     updated_at: datetime
     channel_profile_id: Optional[str] = None
+    preset_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not self.id or not self.id.strip():

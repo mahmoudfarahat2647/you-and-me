@@ -1,6 +1,6 @@
 import { Film, FileText, Image, Lightbulb, Mic, Upload } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { StageId } from '@/types';
+import type { AssetType, ProjectSettings, StageId } from '@/types';
 
 export interface StageParamDefinition {
   label: string;
@@ -209,4 +209,69 @@ export function isStageId(value: string): value is StageId {
 
 export function getStageDefinition(stageId: StageId): WorkflowStageDefinition {
   return WORKFLOW_STAGES.find((stage) => stage.id === stageId) ?? WORKFLOW_STAGES[0];
+}
+
+export const STAGE_ASSET_TYPE: Partial<Record<StageId, AssetType>> = {
+  script: 'script',
+  voice: 'audio',
+  scenes: 'scene',
+  export: 'export',
+};
+
+function readStageParam(
+  settings: ProjectSettings,
+  stageId: StageId,
+  key: string,
+  fallback: string
+): string {
+  const value = settings.stage_params?.[stageId]?.[key];
+  return value !== undefined && value !== '' ? String(value) : fallback;
+}
+
+export function getStageParamsForProject(
+  stage: WorkflowStageDefinition,
+  settings?: ProjectSettings | null
+): readonly StageParamDefinition[] {
+  if (!settings) {
+    return stage.params;
+  }
+
+  switch (stage.id) {
+    case 'idea':
+      return [
+        { label: 'Sources', value: readStageParam(settings, 'idea', 'sources', 'YouTube + Web'), mono: true },
+        { label: 'Language', value: settings.language || 'Arabic' },
+        { label: 'Topic', value: settings.topic_focus || readStageParam(settings, 'idea', 'max_sources', '12') },
+      ];
+    case 'script':
+      return [
+        { label: 'Provider', value: readStageParam(settings, 'script', 'provider', 'ChatGPT') },
+        { label: 'Model', value: readStageParam(settings, 'script', 'model', 'GPT-4o'), mono: true },
+        { label: 'Length', value: readStageParam(settings, 'script', 'script_length', '~ 8 minutes') },
+      ];
+    case 'voice':
+      return [
+        { label: 'Provider', value: readStageParam(settings, 'voice', 'provider', 'ElevenLabs') },
+        { label: 'Voice', value: settings.narrator || 'arabic-narrator-v2', mono: true },
+        { label: 'Format', value: readStageParam(settings, 'voice', 'format', 'WAV · 48kHz'), mono: true },
+      ];
+    case 'scenes':
+      return [
+        { label: 'Style', value: settings.visual_style || 'Full-motion' },
+        { label: 'Aspect', value: settings.video_format || '16:9', mono: true },
+        { label: 'Clip length', value: readStageParam(settings, 'scenes', 'clip_length', '5s / scene') },
+      ];
+    case 'edit':
+      return [
+        { label: 'Engine', value: readStageParam(settings, 'edit', 'engine', 'ffmpeg-7'), mono: true },
+        { label: 'Resolution', value: readStageParam(settings, 'edit', 'resolution', '1920x1080'), mono: true },
+        { label: 'Frame rate', value: readStageParam(settings, 'edit', 'frame_rate', '30 fps') },
+      ];
+    case 'export':
+      return [
+        { label: 'Target', value: settings.upload_destination || readStageParam(settings, 'export', 'target', 'Local MP4') },
+        { label: 'Budget', value: `$${settings.budget_limit_usd.toFixed(2)}`, mono: true },
+        { label: 'Codec', value: readStageParam(settings, 'export', 'codec', 'H.264 / AAC'), mono: true },
+      ];
+  }
 }

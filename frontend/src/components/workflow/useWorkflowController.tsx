@@ -1,13 +1,23 @@
 import { useMemo, type CSSProperties } from 'react';
 import type { Edge } from '@xyflow/react';
-import { isStageId, WORKFLOW_STAGES } from '@/lib/workflow/stages';
+import {
+  getStageParamsForProject,
+  isStageId,
+  STAGE_ASSET_TYPE,
+  WORKFLOW_STAGES,
+} from '@/lib/workflow/stages';
 import { mapStageRuntimeState } from '@/lib/workflow/stageStatus';
 import type { NodeStatus } from '@/components/ui/interactive-ai-agent-workflow-node-card';
 import type {
   AgentNodeCardFlowNode,
   AgentNodeToggleItem,
 } from '@/components/workflow/AgentNodeCardNode';
-import type { StageId, StageRuntimeState } from '@/types';
+import type {
+  ProjectAsset,
+  ProjectSettings,
+  StageId,
+  StageRuntimeState,
+} from '@/types';
 
 export const AGENT_NODE_WIDTH = 320;
 export const AGENT_NODE_GAP = 112;
@@ -64,6 +74,8 @@ interface WorkflowControllerOptions {
   selectedStage: string;
   stageStates?: Partial<Record<StageId, StageRuntimeState>>;
   stageToggles?: Partial<Record<StageId, Record<string, boolean>>>;
+  projectSettings?: ProjectSettings | null;
+  projectAssets?: readonly ProjectAsset[];
   onSelectStage: (stage: StageId) => void;
   onRunStage?: (stage: StageId) => void;
   onToggleStageAuto?: (stage: StageId, enabled: boolean) => void;
@@ -84,6 +96,8 @@ export function useWorkflowController({
   selectedStage,
   stageStates,
   stageToggles,
+  projectSettings,
+  projectAssets,
   onSelectStage,
   onRunStage,
   onToggleStageAuto,
@@ -94,10 +108,25 @@ export function useWorkflowController({
   const nodes = useMemo<AgentNodeCardFlowNode[]>(
     () =>
       WORKFLOW_STAGES.map((stage, index) => {
-        const mapped = mapStageRuntimeState(stageStates?.[stage.id]);
+        const runtimeInput: StageRuntimeState | undefined =
+          stageStates?.[stage.id] ??
+          (projectSettings?.stage_modes?.[stage.id]
+            ? { status: 'pending', mode: projectSettings.stage_modes[stage.id] }
+            : undefined);
+        const mapped = mapStageRuntimeState(runtimeInput);
         const Icon = stage.icon;
         const previous = index > 0 ? WORKFLOW_STAGES[index - 1] : null;
         const next = index < WORKFLOW_STAGES.length - 1 ? WORKFLOW_STAGES[index + 1] : null;
+        const stageAssetType = STAGE_ASSET_TYPE[stage.id];
+        const stageAssetCount =
+          stageAssetType && projectAssets
+            ? projectAssets.filter((asset) => asset.asset_type === stageAssetType).length
+            : 0;
+        const footerSummary =
+          stageStates?.[stage.id]?.footer ??
+          (stageAssetCount > 0
+            ? `${mapped.footer} · ${stageAssetCount} ${stageAssetCount === 1 ? 'asset' : 'assets'}`
+            : mapped.footer);
 
         const toggles: AgentNodeToggleItem[] = stage.toggles.map((toggle) => {
           if (toggle.kind === 'autoMode') {
@@ -140,9 +169,9 @@ export function useWorkflowController({
             statusLabel: mapped.statusLabel,
             selected: selectedId === stage.id,
             disabled: mapped.disabled,
-            params: stage.params,
+            params: getStageParamsForProject(stage, projectSettings),
             toggles,
-            footer: mapped.footer,
+            footer: footerSummary,
             errorMessage: mapped.errorMessage,
             inputLabel: previous?.outputLabel ?? 'Input',
             outputLabel: stage.outputLabel,
@@ -155,14 +184,29 @@ export function useWorkflowController({
           },
         };
       }),
-    [selectedId, stageStates, stageToggles, onSelectStage, onRunStage, onToggleStageAuto, onToggleStageOption]
+    [
+      selectedId,
+      stageStates,
+      stageToggles,
+      projectSettings,
+      projectAssets,
+      onSelectStage,
+      onRunStage,
+      onToggleStageAuto,
+      onToggleStageOption,
+    ]
   );
 
   const edges = useMemo<Edge[]>(
     () =>
       WORKFLOW_STAGES.slice(0, -1).map((stage, index) => {
         const next = WORKFLOW_STAGES[index + 1];
-        const sourceMapped = mapStageRuntimeState(stageStates?.[stage.id]);
+        const runtimeInput: StageRuntimeState | undefined =
+          stageStates?.[stage.id] ??
+          (projectSettings?.stage_modes?.[stage.id]
+            ? { status: 'pending', mode: projectSettings.stage_modes[stage.id] }
+            : undefined);
+        const sourceMapped = mapStageRuntimeState(runtimeInput);
         const { style, animated } = getEdgeStyle(sourceMapped.status);
 
         return {
@@ -174,7 +218,7 @@ export function useWorkflowController({
           style,
         };
       }),
-    [stageStates]
+    [stageStates, projectSettings]
   );
 
   return { nodes, edges };
