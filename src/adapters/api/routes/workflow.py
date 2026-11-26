@@ -1,11 +1,13 @@
 """API routes for persisted workflow job orchestration, stage modes, and scene invalidation."""
 import copy
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from src.adapters.api.routes.providers import SpendPreflightResponse
 from src.adapters.storage.sqlite_workflow_repository import (
     SQLiteWorkflowRepository,
     WorkflowLogEntry,
@@ -145,6 +147,11 @@ class WorkflowStageResponse(BaseModel):
         )
 
 
+class WorkflowBudgetBlockResponse(BaseModel):
+    stage_id: str
+    preflight: SpendPreflightResponse
+
+
 class WorkflowJobResponse(BaseModel):
     id: str
     project_id: str
@@ -157,9 +164,23 @@ class WorkflowJobResponse(BaseModel):
     cancel_requested: bool = False
     completed_at: Optional[str] = None
     error: Optional[str] = None
+    budget_block: Optional[WorkflowBudgetBlockResponse] = None
 
     @classmethod
     def from_dto(cls, job: WorkflowJobResult) -> "WorkflowJobResponse":
+        block = job.metadata.get("preflight_block")
+        budget_block = None
+        if job.status == "paused" and block and block["reason"] == job.error:
+            details = block["details"]
+            stage = job.get_stage(block["stage_id"])
+            if (
+                stage is not None
+                and stage.mode in ("auto", "approval")
+                and details.get("decision") in ("pause_unknown_cost", "pause_budget_exceeded")
+            ):
+                budget_block = WorkflowBudgetBlockResponse(
+                    stage_id=stage.stage_id, preflight=SpendPreflightResponse(**details)
+                )
         return cls(
             id=job.id,
             project_id=job.project_id,
@@ -172,6 +193,7 @@ class WorkflowJobResponse(BaseModel):
             cancel_requested=job.cancel_requested,
             completed_at=job.completed_at,
             error=job.error,
+            budget_block=budget_block,
         )
 
 
@@ -216,8 +238,12 @@ class RunWorkflowRequest(BaseModel):
     force_new: bool = False
 
 
+class ResumeWorkflowRequest(BaseModel):
+    approve_budget_request_key: Optional[str] = None
+
+
 class UpdateStageModeRequest(BaseModel):
-    mode: str
+    mode: StageMode
 
 
 class SubmitManualStageRequest(BaseModel):
@@ -357,23 +383,14 @@ def _sync_modes_into_job(
         next_mode = modes.get(stage.stage_id, stage.mode)
         if next_mode != stage.mode:
             changed = True
+            next_status = stage.status
+            if stage.status in ("waiting_manual", "skipped"):
+                next_status = "pending" if not stage.artifact else "stale"
             updated_stages.append(
-                WorkflowStageResult(
-                    stage_id=stage.stage_id,
+                replace(
+                    stage,
                     mode=next_mode,
-                    status=stage.status,
-                    dependencies=stage.dependencies,
-                    required=stage.required,
-                    artifact_type=stage.artifact_type,
-                    required_schema_version=stage.required_schema_version,
-                    artifact=stage.artifact,
-                    items=stage.items,
-                    params=stage.params,
-                    external_run_id=stage.external_run_id,
-                    error=stage.error,
-                    attempt_count=stage.attempt_count,
-                    started_at=stage.started_at,
-                    completed_at=stage.completed_at,
+                    status=next_status,
                     updated_at=datetime.now(timezone.utc).isoformat(),
                 )
             )
@@ -542,16 +559,17 @@ def run_workflow_stage(
                 CreateWorkflowJobInput(
                     project_id=project_id,
                     stage_configs=stage_configs,
-                    auto_start=True,
+                    auto_start=False,
                 )
             )
+            job = engine.start_job(job.id, through_stage_id=stage_id)
             return _state_response(project_id, job, workflow_repo)
 
         stage = latest.get_stage(stage_id)
         if stage is None:
             raise WorkflowNotFoundError(f"Stage '{stage_id}' does not exist on job '{latest.id}'.")
 
-        if stage.status in ("failed", "stale", "unknown_outcome"):
+        if stage.status in ("failed", "unknown_outcome"):
             job = engine.retry(latest.id, stage_id)
         elif stage.status == "completed":
             engine.invalidate_stage(
@@ -561,13 +579,11 @@ def run_workflow_stage(
                     reason=f"Requested rerun of stage '{stage_id}'.",
                 )
             )
-            job = engine.resume(latest.id)
-        elif latest.status == "paused":
-            job = engine.resume(latest.id)
+            job = engine.resume(latest.id, through_stage_id=stage_id)
         elif latest.status == "pending":
-            job = engine.start_job(latest.id)
+            job = engine.start_job(latest.id, through_stage_id=stage_id)
         else:
-            job = engine.resume(latest.id)
+            job = engine.resume(latest.id, through_stage_id=stage_id)
 
         return _state_response(project_id, job, workflow_repo)
     except (WorkflowValidationError, WorkflowStateError, WorkflowNotFoundError) as err:
@@ -613,6 +629,7 @@ def cancel_project_workflow(
 @router.post("/resume", response_model=WorkflowStateResponse)
 def resume_project_workflow(
     project_id: str,
+    request: Optional[ResumeWorkflowRequest] = None,
     workflow_repo: WorkflowRepository = Depends(get_workflow_repository),
     executor: StageExecutor = Depends(get_stage_executor),
     preflight: ExecutionPreflightPort = Depends(get_execution_preflight),
@@ -621,8 +638,13 @@ def resume_project_workflow(
     _require_project(project_id, project_repo)
     latest = _require_latest_job(workflow_repo, project_id)
     engine = _build_engine(workflow_repo, executor, preflight)
+    confirmation_key = request.approve_budget_request_key if request else None
+    if confirmation_key is not None:
+        block = WorkflowJobResponse.from_dto(latest).budget_block
+        if block is None or block.preflight.request_key != confirmation_key:
+            raise HTTPException(status_code=409, detail="This workflow spend approval is no longer pending.")
     try:
-        job = engine.resume(latest.id)
+        job = engine.resume(latest.id, confirmation_key=confirmation_key)
         return _state_response(project_id, job, workflow_repo)
     except (WorkflowValidationError, WorkflowStateError, WorkflowNotFoundError) as err:
         raise _map_domain_error(err)
@@ -791,13 +813,13 @@ def update_stage_mode(
     ).execute(
         UpdateProjectSettingsInput(
             project_id=project_id,
-            stage_modes={stage_id: request.mode},
+            stage_modes={stage_id: request.mode.value},
         )
     )
 
     latest = _latest_job(workflow_repo, project_id)
     if latest is not None and latest.status != "canceled":
-        latest = _sync_modes_into_job(latest, {stage_id: request.mode}, workflow_repo)
+        latest = _sync_modes_into_job(latest, {stage_id: request.mode.value}, workflow_repo)
 
     return _state_response(project_id, latest, workflow_repo)
 

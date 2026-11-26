@@ -29,6 +29,7 @@ export interface AgentNodeCardProps extends Omit<HTMLAttributes<HTMLDivElement>,
   errorMessage?: string;
   /** Called when the run button is pressed. Leave it out to hide the button. */
   onRunNode?: () => void;
+  runLabel?: string;
   /** Called when the card is clicked, or Enter or Space is pressed on it. */
   onSelect?: () => void;
   disabled?: boolean;
@@ -268,6 +269,7 @@ export const AgentNodeCard = forwardRef<HTMLDivElement, AgentNodeCardProps>(func
     footer,
     errorMessage,
     onRunNode,
+    runLabel: customRunLabel,
     onSelect,
     disabled = false,
     showInputPort = true,
@@ -291,7 +293,7 @@ export const AgentNodeCard = forwardRef<HTMLDivElement, AgentNodeCardProps>(func
   const style = STATUS_STYLES[status];
 
   // What the run button says depends on where the node is
-  const runLabel = running ? "Running…" : status === "completed" ? "Run again" : status === "error" ? "Retry" : "Run node";
+  const runLabel = customRunLabel ?? (running ? "Running…" : status === "completed" ? "Run again" : status === "error" ? "Retry" : "Run node");
 
   const handleClick = (e: MouseEvent<HTMLDivElement>) => {
     onClick?.(e);

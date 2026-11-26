@@ -100,10 +100,18 @@ export async function cancelProjectWorkflow(projectId: string): Promise<Workflow
   );
 }
 
-export async function resumeProjectWorkflow(projectId: string): Promise<WorkflowStateResponse> {
+export async function resumeProjectWorkflow(
+  projectId: string,
+  approveBudgetRequestKey?: string
+): Promise<WorkflowStateResponse> {
   return workflowRequest<WorkflowStateResponse>(
     `/projects/${encodeURIComponent(projectId)}/workflow/resume`,
-    { method: 'POST' },
+    {
+      method: 'POST',
+      ...(approveBudgetRequestKey && {
+        body: JSON.stringify({ approve_budget_request_key: approveBudgetRequestKey }),
+      }),
+    },
     'Failed to resume workflow.'
   );
 }

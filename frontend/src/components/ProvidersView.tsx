@@ -27,6 +27,7 @@ interface ProvidersViewProps {
   activeProjectId?: string | null;
   projectBudget?: ProjectBudgetSummary | null;
   spendLedger?: ProjectSpendLedger | null;
+  loadError?: string | null;
   onConfigureProvider: (payload: ConfigureProviderPayload) => Promise<ProviderConfigSummary>;
   onTestProvider: (providerId: string) => Promise<void>;
   onSelectModel: (providerId: string, model: string) => Promise<void>;
@@ -52,6 +53,7 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
   activeProjectId,
   projectBudget,
   spendLedger,
+  loadError,
   onConfigureProvider,
   onTestProvider,
   onSelectModel,
@@ -67,9 +69,8 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
   const [testingId, setTestingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [budgetInput, setBudgetInput] = useState(
-    projectBudget ? String(projectBudget.budget_limit_usd) : '10'
-  );
+  const [budgetDraft, setBudgetDraft] = useState<string | null>(null);
+  const budgetInput = budgetDraft ?? String(projectBudget?.budget_limit_usd ?? 0);
   const [isSavingBudget, setIsSavingBudget] = useState(false);
 
   const nameId = useId();
@@ -135,10 +136,20 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
     setError(null);
     try {
       await onUpdateProjectBudget(activeProjectId, parsed);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update project budget.');
+      setBudgetDraft(null);
+    } catch {
+      setError('Failed to update project budget.');
     } finally {
       setIsSavingBudget(false);
+    }
+  };
+
+  const handleAction = async (action: () => Promise<void>, message: string) => {
+    setError(null);
+    try {
+      await action();
+    } catch {
+      setError(message);
     }
   };
 
@@ -161,12 +172,12 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
           </Badge>
         </div>
 
-        {error && (
+          {(error || loadError) && (
           <div
             role="alert"
             className="rounded-lg border border-red-800/50 bg-red-950/30 px-3.5 py-2.5 text-xs text-red-200"
           >
-            {error}
+              {error ?? loadError}
           </div>
         )}
 
@@ -313,7 +324,7 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
                               size="icon"
                               variant="ghost"
                               aria-label={`Delete ${provider.name}`}
-                              onClick={() => onDeleteProvider(provider.id)}
+                              onClick={() => void handleAction(() => onDeleteProvider(provider.id), 'Could not delete the provider.')}
                             >
                               <Trash2 className="h-3.5 w-3.5 text-neutral-400 hover:text-red-400" />
                             </Button>
@@ -343,7 +354,10 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
                               id={`model-${provider.id}`}
                               aria-label={`Model for ${provider.name}`}
                               value={provider.selected_model ?? provider.verified_models[0]}
-                              onChange={(e) => onSelectModel(provider.id, e.target.value)}
+                              onChange={(e) => {
+                                const model = e.target.value;
+                                void handleAction(() => onSelectModel(provider.id, model), 'Could not select the model.');
+                              }}
                               className="h-7 rounded border border-[#2e2e2e] bg-[#202020] px-2 text-xs text-neutral-100 focus:border-emerald-500 focus:outline-none"
                             >
                               {provider.verified_models.map((m) => (
@@ -395,7 +409,7 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
                         min="0"
                         step="0.01"
                         value={budgetInput}
-                        onChange={(e) => setBudgetInput(e.target.value)}
+                        onChange={(e) => setBudgetDraft(e.target.value)}
                       />
                     </div>
                     <Button type="submit" size="sm" disabled={isSavingBudget}>
@@ -440,7 +454,10 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                onClick={() => onReconcileRequest(activeProjectId, req.request_key)}
+                                onClick={() => void handleAction(
+                                  () => onReconcileRequest(activeProjectId, req.request_key),
+                                  'Could not reconcile the request.'
+                                )}
                               >
                                 Reconcile
                               </Button>

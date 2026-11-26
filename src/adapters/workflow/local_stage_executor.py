@@ -245,6 +245,7 @@ class LocalStageExecutor(StageExecutor):
                             "filename": clip.original_filename,
                             "file_path": clip.file_path,
                             "position": clip.position,
+                            **request.item_inputs.get(clip.id, {}),
                         },
                     )
                 )
@@ -283,6 +284,7 @@ class LocalStageExecutor(StageExecutor):
                             data={"item_id": item_id, "attempt": request.attempt},
                             created_at=_utc_iso(),
                         ),
+                        input_data=request.item_inputs.get(item_id, {}),
                     )
                 )
             return StageExecutionResult(

@@ -27,6 +27,7 @@ export interface ProjectWorkflowController {
   logs: WorkflowLogEntry[];
   isLoading: boolean;
   isSubmitting: boolean;
+  isStopping: boolean;
   workflowError: string | null;
   stageStates: Partial<Record<StageId, StageRuntimeState>> | undefined;
   runWorkflow: (options?: {
@@ -36,7 +37,7 @@ export interface ProjectWorkflowController {
   runStage: (stageId: StageId) => Promise<WorkflowStateResponse | null>;
   pause: () => Promise<WorkflowStateResponse | null>;
   cancel: () => Promise<WorkflowStateResponse | null>;
-  resume: () => Promise<WorkflowStateResponse | null>;
+  resume: (approveBudgetRequestKey?: string) => Promise<WorkflowStateResponse | null>;
   reconcile: () => Promise<WorkflowStateResponse | null>;
   retryStage: (stageId: StageId) => Promise<WorkflowStateResponse | null>;
   submitManual: (
@@ -53,7 +54,7 @@ export interface ProjectWorkflowController {
       auto_resume?: boolean;
     }
   ) => Promise<WorkflowStateResponse | null>;
-  setStageMode: (stageId: StageId, mode: StageExecutionMode) => Promise<void>;
+  setStageMode: (stageId: StageId, mode: StageExecutionMode) => Promise<WorkflowStateResponse | null>;
   updateScene: (
     sceneId: string,
     payload: { prompt?: string; notes?: string; title?: string; reason?: string }
@@ -73,7 +74,11 @@ export function deriveWorkflowStageStates(
   const states: Partial<Record<StageId, StageRuntimeState>> = {};
   for (const stage of job.stages) {
     let footer: string | undefined;
-    if (stage.status === 'stale') {
+    if (job.budget_block?.stage_id === stage.stage_id) {
+      footer = job.budget_block.preflight.decision === 'pause_unknown_cost'
+        ? 'Budget blocked · unknown cost'
+        : 'Budget blocked · estimated overrun';
+    } else if (stage.status === 'stale') {
       footer = 'Stale · rerun required';
     } else if (stage.status === 'waiting_manual') {
       footer = 'Waiting for manual input';
@@ -102,79 +107,114 @@ export function useProjectWorkflow(
   const [logs, setLogs] = useState<WorkflowLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
-  const activeProjectIdRef = useRef<string | undefined>(projectId);
-  const onExportChangedRef = useRef(options?.onExportMayHaveChanged);
-  onExportChangedRef.current = options?.onExportMayHaveChanged;
+  const sessionToken = useMemo(() => Symbol(projectId), [projectId]);
+  const sessionRef = useRef<{
+    token: symbol;
+    response: WorkflowStateResponse | null;
+    submitting: boolean;
+    stopping: boolean;
+  } | null>(null);
+  const onExportMayHaveChanged = options?.onExportMayHaveChanged;
 
   const applyResponse = useCallback(
-    async (targetProjectId: string, res: WorkflowStateResponse) => {
-      if (activeProjectIdRef.current !== targetProjectId) return;
+    (res: WorkflowStateResponse) => {
+      const session = sessionRef.current;
+      if (session?.token !== sessionToken) return;
+      const previous = session.response?.job;
+      if (previous && (!res.job || previous.updated_at > res.job.updated_at)) return;
+      session.response = res;
       setJob(res.job);
       setLogs(res.logs ?? []);
+      const previousExport = previous?.stages.find((s) => s.stage_id === 'export');
       const exportStage = res.job?.stages.find((s) => s.stage_id === 'export');
-      if (exportStage?.status === 'completed') {
-        await onExportChangedRef.current?.();
+      if (exportStage?.status === 'completed' &&
+          (previousExport?.status !== 'completed' || previousExport.artifact?.artifact_id !== exportStage.artifact?.artifact_id)) {
+        void onExportMayHaveChanged?.();
       }
     },
-    []
+    [sessionToken, onExportMayHaveChanged]
   );
 
   const refresh = useCallback(async () => {
-    if (!projectId) return;
-    const targetProjectId = projectId;
+    if (!projectId || sessionRef.current?.token !== sessionToken) return;
     setIsLoading(true);
     try {
-      const res = await getProjectWorkflow(targetProjectId);
-      if (activeProjectIdRef.current !== targetProjectId) return;
-      setJob(res.job);
-      setLogs(res.logs ?? []);
-    } catch {
-      if (activeProjectIdRef.current !== targetProjectId) return;
-      setJob(null);
-      setLogs([]);
-    } finally {
-      if (activeProjectIdRef.current === targetProjectId) {
-        setIsLoading(false);
+      applyResponse(await getProjectWorkflow(projectId));
+    } catch (err) {
+      if (sessionRef.current?.token === sessionToken) {
+        setWorkflowError(getErrorMessage(err, 'Failed to load workflow state.'));
       }
+    } finally {
+      if (sessionRef.current?.token === sessionToken) setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, sessionToken, applyResponse]);
 
   useEffect(() => {
-    activeProjectIdRef.current = projectId;
+    sessionRef.current = { token: sessionToken, response: null, submitting: false, stopping: false };
     setJob(null);
     setLogs([]);
+    setIsLoading(false);
+    setIsSubmitting(false);
+    setIsStopping(false);
     setWorkflowError(null);
-    if (projectId) {
-      void refresh();
-    }
-  }, [projectId, refresh]);
+    void refresh();
+    return () => { sessionRef.current = null; };
+  }, [sessionToken, refresh]);
+
+  useEffect(() => {
+    if (!projectId || (!isSubmitting && job?.status !== 'running')) return;
+    let polling = false;
+    const timer = window.setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        applyResponse(await getProjectWorkflow(projectId));
+      } catch {
+        // The next poll or action response can reconnect.
+      } finally {
+        polling = false;
+      }
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [applyResponse, isSubmitting, job?.status, projectId]);
 
   const executeAction = useCallback(
     async (
       fn: (targetProjectId: string) => Promise<WorkflowStateResponse>,
-      fallbackErr: string
+      fallbackErr: string,
+      stop = false
     ): Promise<WorkflowStateResponse | null> => {
-      if (!projectId) return null;
-      const targetProjectId = projectId;
-      setIsSubmitting(true);
+      const session = sessionRef.current;
+      if (!projectId || session?.token !== sessionToken || session.stopping || (!stop && session.submitting)) return null;
+      if (stop) {
+        session.stopping = true;
+        setIsStopping(true);
+      } else {
+        session.submitting = true;
+        setIsSubmitting(true);
+      }
       setWorkflowError(null);
       try {
-        const res = await fn(targetProjectId);
-        await applyResponse(targetProjectId, res);
+        const res = await fn(projectId);
+        applyResponse(res);
         return res;
       } catch (err: unknown) {
-        if (activeProjectIdRef.current === targetProjectId) {
+        if (sessionRef.current === session) {
           setWorkflowError(getErrorMessage(err, fallbackErr));
         }
         return null;
       } finally {
-        if (activeProjectIdRef.current === targetProjectId) {
-          setIsSubmitting(false);
+        if (stop) session.stopping = false;
+        else session.submitting = false;
+        if (sessionRef.current === session) {
+          if (stop) setIsStopping(false);
+          else setIsSubmitting(false);
         }
       }
     },
-    [projectId, applyResponse]
+    [projectId, sessionToken, applyResponse]
   );
 
   const runWorkflow = useCallback(
@@ -190,17 +230,17 @@ export function useProjectWorkflow(
   );
 
   const pause = useCallback(
-    () => executeAction((pid) => pauseProjectWorkflow(pid), 'Failed to pause workflow.'),
+    () => executeAction((pid) => pauseProjectWorkflow(pid), 'Failed to pause workflow.', true),
     [executeAction]
   );
 
   const cancel = useCallback(
-    () => executeAction((pid) => cancelProjectWorkflow(pid), 'Failed to cancel workflow.'),
+    () => executeAction((pid) => cancelProjectWorkflow(pid), 'Failed to cancel workflow.', true),
     [executeAction]
   );
 
   const resume = useCallback(
-    () => executeAction((pid) => resumeProjectWorkflow(pid), 'Failed to resume workflow.'),
+    (requestKey?: string) => executeAction((pid) => resumeProjectWorkflow(pid, requestKey), 'Failed to resume workflow.'),
     [executeAction]
   );
 
@@ -243,12 +283,11 @@ export function useProjectWorkflow(
   );
 
   const setStageMode = useCallback(
-    async (stageId: StageId, mode: StageExecutionMode) => {
-      await executeAction(
+    (stageId: StageId, mode: StageExecutionMode) =>
+      executeAction(
         (pid) => updateWorkflowStageMode(pid, stageId, mode),
         `Failed to update mode for "${stageId}".`
-      );
-    },
+      ),
     [executeAction]
   );
 
@@ -263,13 +302,15 @@ export function useProjectWorkflow(
 
   const clearError = useCallback(() => setWorkflowError(null), []);
 
-  const stageStates = useMemo(() => deriveWorkflowStageStates(job), [job]);
+  const projectJob = job?.project_id === projectId ? job : null;
+  const stageStates = useMemo(() => deriveWorkflowStageStates(projectJob), [projectJob]);
 
   return {
-    job,
-    logs,
+    job: projectJob,
+    logs: projectJob ? logs : [],
     isLoading,
     isSubmitting,
+    isStopping,
     workflowError,
     stageStates,
     runWorkflow,

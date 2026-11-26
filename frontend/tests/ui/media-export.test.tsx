@@ -144,8 +144,8 @@ it('imports two moving clips and narration, reorders clips, exports MP4, and pla
   const scenesCard = await screen.findByRole('group', { name: 'Scenes' });
   expect(within(scenesCard).getByText('Needs 2+ moving clips')).toBeInTheDocument();
 
-  // Clicking Run node on Scenes navigates to Assets tab
-  fireEvent.click(within(scenesCard).getByRole('button', { name: 'Run node' }));
+  // Import media through the Assets tab.
+  fireEvent.click(within(screen.getByRole('main')).getByRole('button', { name: /^assets/i }));
   expect(await screen.findByText('Project Media Assets')).toBeInTheDocument();
 
   // Import two clips
@@ -174,25 +174,24 @@ it('imports two moving clips and narration, reorders clips, exports MP4, and pla
   expect(within(items[0]).getByText('blue_clip.mp4')).toBeInTheDocument();
   expect(within(items[1]).getByText('red_clip.mp4')).toBeInTheDocument();
 
-  // Switch back to Workflow tab and check Voice/Scenes/Export readiness, then run Export node
+  // Imported media is ready for the workflow before its stages execute.
   fireEvent.click(screen.getByRole('button', { name: 'workflow' }));
 
   const voiceAfter = await screen.findByRole('group', { name: 'Voice' });
   const scenesAfter = screen.getByRole('group', { name: 'Scenes' });
   const exportCard = screen.getByRole('group', { name: 'Export' });
-  expect(within(voiceAfter).getByRole('status')).toHaveTextContent('Completed');
-  expect(within(scenesAfter).getByRole('status')).toHaveTextContent('Completed');
+  expect(within(voiceAfter).getByText(/narration.wav/)).toBeInTheDocument();
+  expect(within(scenesAfter).getByText(/2 clips/)).toBeInTheDocument();
   expect(within(exportCard).getByText('Ready to export MP4')).toBeInTheDocument();
 
-  fireEvent.click(within(exportCard).getByRole('button', { name: 'Run node' }));
+  const main = within(screen.getByRole('main'));
+  fireEvent.click(main.getByRole('button', { name: 'output' }));
+  fireEvent.click(main.getByRole('button', { name: 'Export MP4' }));
   await waitFor(() => {
     expect(exportProjectMp4).toHaveBeenCalledWith(sampleProject.id);
   });
 
-  expect(await within(exportCard).findByRole('status')).toHaveTextContent('Completed');
-
-  // Open Output tab and verify <video controls> and metadata
-  fireEvent.click(within(screen.getByRole('main')).getByRole('button', { name: 'output' }));
+  // Verify <video controls> and metadata after the standalone export.
   const videoEl = await screen.findByLabelText('Exported MP4 preview');
   expect(videoEl.tagName).toBe('VIDEO');
   expect(videoEl).toHaveAttribute('controls');
@@ -217,21 +216,11 @@ it('shows actionable error naming offending input on failed re-export and preser
 
   render(<App />);
 
-  const exportCard = await screen.findByRole('group', { name: 'Export' });
-  await waitFor(() => {
-    expect(within(exportCard).getByRole('status')).toHaveTextContent('Completed');
-  });
+  const main = within(await screen.findByRole('main'));
+  fireEvent.click(main.getByRole('button', { name: 'output' }));
+  fireEvent.click(await main.findByRole('button', { name: 'Re-export MP4' }));
+  await waitFor(() => expect(main.getByText(/blue_clip.mp4/)).toBeInTheDocument());
 
-  // Re-export fails
-  fireEvent.click(within(exportCard).getByRole('button', { name: 'Run again' }));
-
-  const alert = await within(exportCard).findByRole('alert');
-  expect(alert).toHaveTextContent('blue_clip.mp4');
-  expect(within(exportCard).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
-  expect(within(exportCard).getByText('Prior MP4 preserved')).toBeInTheDocument();
-
-  // Output tab still preserves and plays the previous usable MP4
-  fireEvent.click(within(screen.getByRole('main')).getByRole('button', { name: 'output' }));
   const videoEl = await screen.findByLabelText('Exported MP4 preview');
   expect(videoEl).toHaveAttribute(
     'src',

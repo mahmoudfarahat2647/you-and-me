@@ -5,6 +5,8 @@ import { Inspector } from './components/Inspector';
 import { ProjectListModal } from './components/ProjectListModal';
 import { CreateProjectDialog } from './components/CreateProjectDialog';
 import { ChannelsView } from './components/ChannelsView';
+import { ProvidersView } from './components/ProvidersView';
+import { BudgetPreflightBanner } from './components/BudgetPreflightBanner';
 import { ActionableError } from './components/ActionableError';
 import {
   checkBackendHealth,
@@ -22,6 +24,8 @@ import {
   updateProjectSettings,
 } from './api/client';
 import { useProjectMedia } from './hooks/useProjectMedia';
+import { useProjectWorkflow } from './hooks/useProjectWorkflow';
+import { useProjectProviders } from './hooks/useProjectProviders';
 import { isStageId } from './lib/workflow/stages';
 import type {
   ChannelProfile,
@@ -60,8 +64,23 @@ export function App() {
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
   const [selectedStage, setSelectedStage] = useState('script');
   const [activeCanvasTab, setActiveCanvasTab] = useState<WorkspaceTab>('workflow');
-  const [localStageModes, setLocalStageModes] = useState<Partial<Record<StageId, StageExecutionMode>>>({});
   const media = useProjectMedia(activeProject?.id);
+  const workflow = useProjectWorkflow(activeProject?.id, { onExportMayHaveChanged: media.refresh });
+  const { setStageMode } = workflow;
+  const providerSettings = useProjectProviders(
+    backendStatus === 'healthy', currentView === 'providers' ? activeProject?.id : undefined
+  );
+  const budgetBlock = workflow.job?.budget_block;
+  const actionStage = workflow.job?.stages.find((stage) =>
+    stage.status === 'waiting_manual' || stage.status === 'awaiting_approval'
+  )?.stage_id;
+
+  useEffect(() => {
+    if (actionStage) {
+      setSelectedStage(actionStage);
+      setIsInspectorOpen(true);
+    }
+  }, [workflow.job?.id, actionStage]);
 
   const activeProjectIdRef = useRef<string | null>(null);
 
@@ -79,7 +98,6 @@ export function App() {
     activeProjectIdRef.current = projectId;
     setActiveProjectSettings(null);
     setActiveProjectAssets([]);
-    setLocalStageModes({});
     if (!projectId) return;
 
     try {
@@ -98,24 +116,6 @@ export function App() {
   useEffect(() => {
     void loadProjectContext(activeProject?.id ?? null);
   }, [activeProject?.id, loadProjectContext]);
-
-  const handleRunStage = useCallback(
-    (stage: StageId) => {
-      setSelectedStage(stage);
-      if (stage === 'voice' || stage === 'scenes') {
-        setActiveCanvasTab('assets');
-        return;
-      }
-      if (stage === 'edit' || stage === 'export') {
-        void media.triggerExport();
-      }
-    },
-    [media]
-  );
-
-  const handleRunWorkflow = useCallback(() => {
-    void media.triggerExport();
-  }, [media]);
 
   const initBackendAndProjects = useCallback(async (isRetry = false) => {
     if (initializing.current) return;
@@ -234,10 +234,11 @@ export function App() {
   );
 
   const handleStageModeChange = useCallback(
-    (stage: StageId, mode: StageExecutionMode) => {
+    async (stage: StageId, mode: StageExecutionMode) => {
       if (!activeProject) return;
       const targetProjectId = activeProject.id;
-      if (activeProjectSettings && activeProjectSettings.project_id === targetProjectId) {
+      const result = await setStageMode(stage, mode);
+      if (result && activeProjectIdRef.current === targetProjectId) {
         setActiveProjectSettings((prev) =>
           prev && prev.project_id === targetProjectId
             ? {
@@ -246,12 +247,10 @@ export function App() {
               }
             : prev
         );
-        void handleUpdateProjectSettings({ stage_modes: { [stage]: mode } });
-      } else {
-        setLocalStageModes((prev) => ({ ...prev, [stage]: mode }));
       }
+      return result;
     },
-    [activeProject, activeProjectSettings, handleUpdateProjectSettings]
+    [activeProject, setStageMode]
   );
 
   const handleCreateAsset = useCallback(
@@ -285,7 +284,7 @@ export function App() {
     setIsCreateDialogOpen(true);
   };
 
-  const stageModes = activeProjectSettings?.stage_modes ?? localStageModes;
+  const stageModes = activeProjectSettings?.stage_modes;
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#191919] text-neutral-100 antialiased font-sans">
@@ -335,28 +334,60 @@ export function App() {
                 onSelectProject={handleSelectProject}
                 onOpenCreateProjectForChannel={(channelId) => openCreateDialog(channelId)}
               />
-            ) : activeProject ? (
-              <WorkflowCanvas
-                key={activeProject.id}
-                project={activeProject}
-                onOpenProjectsModal={() => setIsProjectsModalOpen(true)}
-                selectedStage={selectedStage}
-                onSelectStage={setSelectedStage}
-                stageStates={media.stageStates}
-                stageModes={stageModes}
-                onStageModeChange={handleStageModeChange}
-                onRunStage={handleRunStage}
-                onRunWorkflow={handleRunWorkflow}
-                isInspectorOpen={isInspectorOpen}
-                projectSettings={activeProjectSettings}
-                projectAssets={activeProjectAssets}
-                onCreateAsset={handleCreateAsset}
-                onDeleteAsset={handleDeleteAsset}
-                activeChannel={activeChannel}
-                activeTab={activeCanvasTab}
-                onTabChange={setActiveCanvasTab}
-                mediaController={media}
+            ) : currentView === 'providers' ? (
+              <ProvidersView
+                key={activeProject?.id ?? 'providers'}
+                providers={providerSettings.providers}
+                activeProjectId={activeProject?.id}
+                projectBudget={providerSettings.ledger?.budget}
+                spendLedger={providerSettings.ledger}
+                loadError={providerSettings.error}
+                onConfigureProvider={providerSettings.configure}
+                onTestProvider={providerSettings.test}
+                onSelectModel={providerSettings.selectModel}
+                onDeleteProvider={providerSettings.remove}
+                onUpdateProjectBudget={providerSettings.updateBudget}
+                onReconcileRequest={providerSettings.reconcile}
               />
+            ) : activeProject ? (
+              <>
+                {budgetBlock && (
+                  <div className="px-6 pt-3">
+                    <BudgetPreflightBanner
+                      budget={null}
+                      preflight={budgetBlock.preflight}
+                      isBusy={workflow.isSubmitting || workflow.isStopping}
+                      onApproveOverrun={(preflight) => void workflow.resume(preflight.request_key)}
+                      onSwitchToManual={async () => {
+                        if (!(await handleStageModeChange(budgetBlock.stage_id, 'manual'))) return;
+                        setSelectedStage(budgetBlock.stage_id);
+                        setIsInspectorOpen(true);
+                      }}
+                    />
+                  </div>
+                )}
+                <WorkflowCanvas
+                  key={activeProject.id}
+                  project={activeProject}
+                  onOpenProjectsModal={() => setIsProjectsModalOpen(true)}
+                  selectedStage={selectedStage}
+                  onSelectStage={setSelectedStage}
+                  stageStates={media.stageStates}
+                  stageModes={stageModes}
+                  onStageModeChange={handleStageModeChange}
+                  isInspectorOpen={isInspectorOpen}
+                  projectSettings={activeProjectSettings}
+                  projectAssets={activeProjectAssets}
+                  onCreateAsset={handleCreateAsset}
+                  onDeleteAsset={handleDeleteAsset}
+                  activeChannel={activeChannel}
+                  activeTab={activeCanvasTab}
+                  onTabChange={setActiveCanvasTab}
+                  mediaController={media}
+                  workflowController={workflow}
+                  providers={providerSettings.providers}
+                />
+              </>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center canvas-dots">
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#202020] border border-[#2e2e2e] text-emerald-400 mb-4 shadow-lg">
@@ -390,13 +421,15 @@ export function App() {
           </main>
 
           {/* Right Inspector */}
-          {currentView !== 'channels' && activeProject && (
+          {currentView !== 'channels' && currentView !== 'providers' && activeProject && (
             <Inspector
               key={activeProject.id}
               isCollapsed={!isInspectorOpen}
               onToggleCollapse={() => setIsInspectorOpen((open) => !open)}
               selectedStage={selectedStage}
-              stageMode={isStageId(selectedStage) ? (stageModes?.[selectedStage] ?? 'auto') : 'auto'}
+              stageMode={isStageId(selectedStage)
+                ? workflow.stageStates?.[selectedStage]?.mode ?? stageModes?.[selectedStage] ?? 'auto'
+                : 'auto'}
               onStageModeChange={(mode) => {
                 if (isStageId(selectedStage)) {
                   handleStageModeChange(selectedStage, mode);
@@ -407,6 +440,8 @@ export function App() {
               onUpdateSettings={handleUpdateProjectSettings}
               projectAssets={activeProjectAssets}
               mediaController={media}
+              workflowController={workflow}
+              providers={providerSettings.providers}
               onOpenMediaTab={(tab) => setActiveCanvasTab(tab)}
             />
           )}

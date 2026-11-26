@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   deleteProjectMediaItem,
   exportProjectMp4,
@@ -62,6 +62,7 @@ export function useProjectMedia(projectId: string | undefined): ProjectMediaCont
   const [scenesError, setScenesError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [logs, setLogs] = useState<MediaLogEntry[]>([]);
+  const mediaSession = useRef<symbol | null>(null);
 
   const appendLog = useCallback((stage: StageId, level: 'info' | 'error', message: string) => {
     const entry: MediaLogEntry = {
@@ -75,6 +76,7 @@ export function useProjectMedia(projectId: string | undefined): ProjectMediaCont
   }, []);
 
   useEffect(() => {
+    mediaSession.current = Symbol(projectId);
     let cancelled = false;
 
     async function load() {
@@ -104,6 +106,7 @@ export function useProjectMedia(projectId: string | undefined): ProjectMediaCont
     void load();
     return () => {
       cancelled = true;
+      mediaSession.current = null;
     };
   }, [projectId]);
 
@@ -269,8 +272,10 @@ export function useProjectMedia(projectId: string | undefined): ProjectMediaCont
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
+    const session = mediaSession.current;
     try {
       const bundle = await getProjectMedia(projectId);
+      if (session === null || mediaSession.current !== session) return;
       setClips(bundle.clips);
       setAudio(bundle.audio);
       setLatestExport(bundle.latest_export);

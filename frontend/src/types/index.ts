@@ -1,3 +1,5 @@
+import type { SpendPreflightResult } from './providers';
+
 export interface Project {
   id: string;
   name: string;
@@ -224,6 +226,7 @@ export interface WorkflowJob {
   cancel_requested: boolean;
   completed_at?: string | null;
   error?: string | null;
+  budget_block?: { stage_id: StageId; preflight: SpendPreflightResult } | null;
 }
 
 export interface WorkflowLogEntry {

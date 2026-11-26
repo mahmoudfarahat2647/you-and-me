@@ -126,6 +126,7 @@ class StageExecutionInput:
     preserved_items: Dict[str, StageItemStateDto] = field(default_factory=dict)
     params: Dict[str, Any] = field(default_factory=dict)
     attempt: int = 1
+    item_inputs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -172,6 +173,8 @@ class PreflightCheckInput:
     artifact_type: str
     params: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    attempt: int = 1
+    confirmation_key: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +184,7 @@ class PreflightDecision:
     allowed: bool
     reason: Optional[str] = None
     requires_confirmation: bool = False
+    details: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

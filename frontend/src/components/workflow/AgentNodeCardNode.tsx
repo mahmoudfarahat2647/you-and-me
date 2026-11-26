@@ -45,6 +45,7 @@ export interface AgentNodeCardNodeData extends Record<string, unknown> {
   portOffset?: number;
   onSelect?: () => void;
   onRunNode?: () => void;
+  runLabel?: string;
 }
 
 export type AgentNodeCardFlowNode = Node<AgentNodeCardNodeData, 'agentNodeCard'>;
@@ -77,6 +78,7 @@ export function AgentNodeCardNode({ data }: NodeProps<AgentNodeCardFlowNode>) {
         errorMessage={data.errorMessage}
         onSelect={data.onSelect}
         onRunNode={data.onRunNode}
+        runLabel={data.runLabel}
         inputLabel={inputLabel}
         outputLabel={outputLabel}
         inputConnected={data.inputConnected}

@@ -28,15 +28,13 @@ from src.adapters.storage.sqlite_project_repository import SQLiteProjectReposito
 from src.adapters.storage.sqlite_project_settings_repository import SQLiteProjectSettingsRepository
 from src.adapters.storage.sqlite_provider_repository import SQLiteProviderRepository
 from src.adapters.storage.sqlite_workflow_repository import SQLiteWorkflowRepository
+from src.adapters.workflow.budget_preflight_adapter import BudgetPreflightAdapter
 from src.adapters.workflow.local_stage_executor import LocalStageExecutor
 from src.core.ports.asset_repository import ProjectAssetRepository
 from src.core.ports.budget_repository import BudgetRepository
 from src.core.ports.channel_repository import ChannelRepository
 from src.core.ports.credential_vault import CredentialVaultPort
-from src.core.ports.execution_preflight import (
-    AllowAllExecutionPreflight,
-    ExecutionPreflightPort,
-)
+from src.core.ports.execution_preflight import ExecutionPreflightPort
 from src.core.ports.media_processor import MediaProcessor
 from src.core.ports.preset_repository import PresetRepository
 from src.core.ports.project_media_repository import ProjectMediaRepository
@@ -145,7 +143,12 @@ def create_app(
         )
 
     if execution_preflight is None:
-        execution_preflight = AllowAllExecutionPreflight()
+        execution_preflight = BudgetPreflightAdapter(
+            budget_repo=budget_repository,
+            provider_repo=provider_repository,
+            credential_vault=credential_vault,
+            provider_gateway=provider_gateway,
+        )
 
     app.dependency_overrides[projects.get_repository] = lambda: repository
     app.dependency_overrides[projects.get_settings_repository_for_projects] = lambda: settings_repository

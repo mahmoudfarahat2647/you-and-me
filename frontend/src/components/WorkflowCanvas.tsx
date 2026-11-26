@@ -35,6 +35,7 @@ import type {
   StageId,
   StageRuntimeState,
 } from '../types';
+import type { ProviderConfigSummary } from '../types/providers';
 import type { ProjectMediaController } from '../hooks/useProjectMedia';
 import type { ProjectWorkflowController } from '../hooks/useProjectWorkflow';
 import { WORKFLOW_STAGES } from '../lib/workflow/stages';
@@ -69,6 +70,7 @@ interface WorkflowCanvasProps {
   onTabChange?: (tab: WorkspaceTab) => void;
   mediaController?: ProjectMediaController;
   workflowController?: ProjectWorkflowController;
+  providers?: readonly ProviderConfigSummary[];
 }
 
 const nodeTypes = {
@@ -78,7 +80,6 @@ const nodeTypes = {
 type InteractionMode = 'select' | 'pan';
 
 const FIT_VIEW_OPTIONS = { padding: 0.12, maxZoom: 1 } as const;
-const PREVIEW_STEP_DURATION_MS = 1400;
 
 interface WorkflowSurfaceProps {
   selectedStage: string;
@@ -87,7 +88,11 @@ interface WorkflowSurfaceProps {
   stageToggles?: Partial<Record<StageId, Record<string, boolean>>>;
   projectSettings?: ProjectSettings | null;
   projectAssets?: readonly ProjectAsset[];
-  onRunStage: (stage: StageId) => void;
+  onRunStage?: (stage: StageId) => void;
+  executionLocked: boolean;
+  modeLocked: boolean;
+  providers?: readonly ProviderConfigSummary[];
+  workflowController?: ProjectWorkflowController;
   onToggleStageAuto: (stage: StageId, enabled: boolean) => void;
   onToggleStageOption: (stage: StageId, toggleId: string, checked: boolean) => void;
   isInspectorOpen?: boolean;
@@ -101,6 +106,10 @@ const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
   projectSettings,
   projectAssets,
   onRunStage,
+  executionLocked,
+  modeLocked,
+  providers,
+  workflowController,
   onToggleStageAuto,
   onToggleStageOption,
   isInspectorOpen,
@@ -117,21 +126,19 @@ const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
     projectAssets,
     onSelectStage,
     onRunStage,
+    executionLocked,
+    modeLocked,
+    providers,
+    job: workflowController?.job,
     onToggleStageAuto,
     onToggleStageOption,
   });
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<AgentNodeCardFlowNode>(controllerNodes);
-
-  // Keep React Flow's dragged positions while controller data stays authoritative.
-  useEffect(() => {
-    setNodes((current) =>
-      controllerNodes.map((node) => {
-        const existing = current.find((candidate) => candidate.id === node.id);
-        return existing ? { ...node, position: existing.position } : node;
-      })
-    );
-  }, [controllerNodes, setNodes]);
+  const [layoutNodes, , onNodesChange] = useNodesState<AgentNodeCardFlowNode>(controllerNodes);
+  const nodes = useMemo(() => controllerNodes.map((node) => {
+    const layout = layoutNodes.find((candidate) => candidate.id === node.id);
+    return layout ? { ...layout, ...node, position: layout.position } : node;
+  }), [controllerNodes, layoutNodes]);
 
   // Refit the workflow nodes when the right inspector panel opens or closes.
   useEffect(() => {
@@ -254,6 +261,7 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   onTabChange,
   mediaController,
   workflowController,
+  providers,
 }) => {
   const [localActiveTab, setLocalActiveTab] = useState<WorkspaceTab>('workflow');
   const activeTab = controlledActiveTab ?? localActiveTab;
@@ -266,8 +274,6 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   };
   const [localModes, setLocalModes] = useState<Partial<Record<StageId, StageExecutionMode>>>({});
   const [localToggles, setLocalToggles] = useState<Partial<Record<StageId, Record<string, boolean>>>>({});
-  const [localRunStates, setLocalRunStates] = useState<Partial<Record<StageId, StageRuntimeState>>>({});
-  const [isRunningWorkflow, setIsRunningWorkflow] = useState(false);
 
   const [assetFilter, setAssetFilter] = useState<'all' | AssetType>('all');
   const [assetType, setAssetType] = useState<AssetType>('script');
@@ -278,50 +284,13 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   const assetNameId = useId();
   const assetContentId = useId();
 
-  const mountedRef = useRef(true);
-  const timersRef = useRef<Set<number>>(new Set());
-
-  // Clear local transient stage state whenever switching projects so no state leaks.
   useEffect(() => {
     setLocalModes({});
     setLocalToggles({});
-    setLocalRunStates({});
     setAssetName('');
     setAssetContent('');
     setAssetFilter('all');
   }, [project.id]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    const timers = timersRef.current;
-    return () => {
-      mountedRef.current = false;
-      for (const id of timers) {
-        window.clearTimeout(id);
-      }
-      timers.clear();
-    };
-  }, []);
-
-  const waitStep = useCallback((ms: number) => {
-    return new Promise<void>((resolve) => {
-      const id = window.setTimeout(() => {
-        timersRef.current.delete(id);
-        resolve();
-      }, ms);
-      timersRef.current.add(id);
-    });
-  }, []);
-
-  const getStageMode = useCallback(
-    (stageId: StageId): StageExecutionMode =>
-      stageModes?.[stageId] ??
-      localModes[stageId] ??
-      stageStates?.[stageId]?.mode ??
-      projectSettings?.stage_modes?.[stageId] ??
-      'auto',
-    [stageModes, localModes, stageStates, projectSettings]
-  );
 
   const handleToggleStageAuto = useCallback(
     (stageId: StageId, enabled: boolean) => {
@@ -348,79 +317,39 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     []
   );
 
-  const runLocalStage = useCallback(
-    async (stageId: StageId) => {
-      if (getStageMode(stageId) === 'off') return;
-      setLocalRunStates((prev) => ({
-        ...prev,
-        [stageId]: { status: 'running' },
-      }));
-      await waitStep(PREVIEW_STEP_DURATION_MS);
-      if (!mountedRef.current) return;
-      setLocalRunStates((prev) => ({
-        ...prev,
-        [stageId]: { status: 'completed' },
-      }));
-    },
-    [getStageMode, waitStep]
-  );
-
   const handleRunStage = useCallback(
     (stageId: StageId) => {
-      if (onRunStage) {
-        onRunStage(stageId);
-        return;
+      onSelectStage(stageId);
+      if (workflowController) {
+        const status = workflowController.stageStates?.[stageId]?.status;
+        void (status === 'failed'
+          ? workflowController.retryStage(stageId)
+          : workflowController.runStage(stageId));
+      } else {
+        onRunStage?.(stageId);
       }
-      void runLocalStage(stageId);
     },
-    [onRunStage, runLocalStage]
+    [onSelectStage, onRunStage, workflowController]
   );
 
-  const handleRunWorkflow = useCallback(async () => {
-    if (onRunWorkflow) {
-      onRunWorkflow();
-      return;
-    }
-    if (isRunningWorkflow) return;
-
-    setIsRunningWorkflow(true);
-    setLocalRunStates({});
-    try {
-      for (const stage of WORKFLOW_STAGES) {
-        if (!mountedRef.current) return;
-        if (getStageMode(stage.id) === 'off') continue;
-        await runLocalStage(stage.id);
-      }
-    } finally {
-      if (mountedRef.current) {
-        setIsRunningWorkflow(false);
-      }
-    }
-  }, [onRunWorkflow, isRunningWorkflow, getStageMode, runLocalStage]);
-
-  const effectiveStageStates = useMemo<Partial<Record<StageId, StageRuntimeState>> | undefined>(() => {
-    const merged: Partial<Record<StageId, StageRuntimeState>> = {};
-    let hasAnyEntry = false;
-
+  const effectiveStageStates = useMemo(() => {
+    const states: Partial<Record<StageId, StageRuntimeState>> = {};
     for (const stage of WORKFLOW_STAGES) {
+      const persisted = workflowController?.stageStates?.[stage.id];
       const callerState = stageStates?.[stage.id];
-      const localRun = localRunStates[stage.id];
-      const overrideMode =
-        stageModes?.[stage.id] ?? localModes[stage.id] ?? projectSettings?.stage_modes?.[stage.id];
-
-      if (callerState || localRun || overrideMode) {
-        hasAnyEntry = true;
-        merged[stage.id] = {
-          ...(localRun ?? {}),
-          ...(callerState ?? {}),
-          status: callerState?.status ?? localRun?.status ?? 'pending',
-          mode: overrideMode ?? callerState?.mode,
+      const mode = persisted?.mode ?? stageModes?.[stage.id] ?? localModes[stage.id] ??
+        callerState?.mode ?? projectSettings?.stage_modes?.[stage.id];
+      if (persisted || callerState || mode) {
+        states[stage.id] = {
+          status: persisted?.status ?? (workflowController ? 'pending' : callerState?.status ?? 'pending'),
+          mode,
+          footer: persisted?.footer ?? (mode === 'off' ? undefined : callerState?.footer),
+          errorMessage: persisted?.errorMessage ?? (workflowController ? undefined : callerState?.errorMessage),
         };
       }
     }
-
-    return hasAnyEntry ? merged : undefined;
-  }, [stageStates, localRunStates, stageModes, localModes, projectSettings]);
+    return states;
+  }, [workflowController, stageStates, stageModes, localModes, projectSettings]);
 
   const handleCreateAssetSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -450,16 +379,17 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     (mediaController ? mediaController.clips.length + (mediaController.audio ? 1 : 0) : 0);
 
   const wfJob = workflowController?.job ?? null;
-  const wfBusy = isRunningWorkflow || Boolean(workflowController?.isSubmitting);
-  const wfRunning = wfJob?.status === 'running' || wfBusy;
+  const wfBusy = Boolean(workflowController?.isLoading || workflowController?.isSubmitting || workflowController?.isStopping);
+  const wfRunning = wfJob?.status === 'running';
   const wfPaused = wfJob?.status === 'paused';
   const wfNeedsReconcile = wfJob?.status === 'needs_reconciliation';
-  const wfCanCancel =
-    wfJob !== null &&
-    (wfJob.status === 'running' ||
-      wfJob.status === 'paused' ||
-      wfJob.status === 'pending' ||
-      wfJob.status === 'needs_reconciliation');
+  const wfBudgetBlocked = Boolean(wfJob?.budget_block);
+  const wfHasStaleStages = wfJob?.stages.some((stage) => stage.status === 'stale');
+  const wfWaitingForInput = wfJob?.stages.some((stage) =>
+    stage.status === 'waiting_manual' || stage.status === 'awaiting_approval'
+  );
+  const wfCanCancel = wfRunning || wfPaused || wfJob?.status === 'pending' || wfNeedsReconcile;
+  const executionLocked = wfBusy || wfRunning || wfNeedsReconcile || wfBudgetBlocked;
 
   const combinedLogs = [
     ...(workflowController?.logs ?? []).map((entry) => ({
@@ -538,7 +468,7 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={wfBusy}
+                disabled={workflowController.isStopping}
                 onClick={() => void workflowController.pause()}
                 className="gap-1.5"
               >
@@ -551,7 +481,7 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={wfBusy}
+                disabled={workflowController.isStopping}
                 onClick={() => void workflowController.cancel()}
                 className="gap-1.5"
               >
@@ -559,7 +489,7 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
                 <span>Cancel</span>
               </Button>
             )}
-            {workflowController && (wfNeedsReconcile || wfJob !== null) && (
+            {workflowController && (wfNeedsReconcile || (wfRunning && !workflowController.isSubmitting)) && (
               <Button
                 type="button"
                 variant="outline"
@@ -577,22 +507,25 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
                 type="button"
                 variant="workflow"
                 className="gap-2"
-                disabled={wfBusy}
+                disabled={wfBusy || wfBudgetBlocked || wfWaitingForInput || Boolean(wfJob?.stages.some((stage) => stage.status === 'failed'))}
                 onClick={() => void workflowController.resume()}
               >
                 <RotateCcw className="h-3 w-3 text-emerald-400" />
-                <span>{wfBusy ? 'Resuming…' : 'Resume Workflow'}</span>
+                <span>{wfHasStaleStages ? 'Rerun Affected Stages' : 'Resume Workflow'}</span>
               </Button>
             ) : (
               <Button
                 type="button"
                 variant="workflow"
                 className="gap-2"
-                disabled={wfRunning || wfNeedsReconcile}
-                onClick={() => void handleRunWorkflow()}
+                disabled={executionLocked || (!workflowController && !onRunWorkflow)}
+                onClick={() => {
+                  if (workflowController) void workflowController.runWorkflow();
+                  else onRunWorkflow?.();
+                }}
               >
                 <Play className="h-3 w-3 fill-emerald-400" />
-                <span>{wfRunning ? 'Running…' : 'Run Workflow'}</span>
+                <span>{wfRunning ? 'Running…' : wfJob?.status === 'completed' ? 'Run Workflow Again' : 'Run Workflow'}</span>
               </Button>
             )}
           </div>
@@ -656,7 +589,11 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             stageToggles={localToggles}
             projectSettings={projectSettings}
             projectAssets={projectAssets}
-            onRunStage={handleRunStage}
+            onRunStage={workflowController || onRunStage ? handleRunStage : undefined}
+            executionLocked={executionLocked}
+            modeLocked={wfBusy || wfRunning || wfNeedsReconcile || !onStageModeChange && Boolean(workflowController)}
+            providers={providers}
+            workflowController={workflowController}
             onToggleStageAuto={handleToggleStageAuto}
             onToggleStageOption={handleToggleStageOption}
             isInspectorOpen={isInspectorOpen}

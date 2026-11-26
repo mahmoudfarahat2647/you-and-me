@@ -1,4 +1,6 @@
 """Adapter implementing ExecutionPreflightPort on top of BudgetGuardUseCase."""
+from dataclasses import asdict
+import math
 from typing import Optional, Tuple
 
 from src.core.dto.provider_dto import (
@@ -31,16 +33,14 @@ _STAGE_CAPABILITY_MAP = {
     "export": ProviderCapability.VIDEO_GENERATION,
 }
 
-_LOCAL_FREE_STAGES = {"edit", "export"}
-
-
 def _parse_optional_float(value: object) -> Optional[float]:
     if value is None or value == "":
         return None
     if isinstance(value, bool):
         return None
     try:
-        return float(value)  # type: ignore[arg-type]
+        cost = float(value)  # type: ignore[arg-type]
+        return cost if math.isfinite(cost) and cost >= 0 else None
     except (TypeError, ValueError):
         return None
 
@@ -75,37 +75,22 @@ class BudgetPreflightAdapter(ExecutionPreflightPort):
 
         has_cost_param = "estimated_cost_usd" in request.params
         estimated_cost_usd = _parse_optional_float(request.params.get("estimated_cost_usd"))
-        if not has_cost_param and "estimated_cost_usd" in request.metadata:
+        has_metadata_cost = "estimated_cost_usd" in request.metadata
+        if not has_cost_param and has_metadata_cost:
             estimated_cost_usd = _parse_optional_float(request.metadata.get("estimated_cost_usd"))
 
-        if request.stage_id in _LOCAL_FREE_STAGES and not provider_id and not has_cost_param:
+        # Phase 1's built-in stages use local inputs unless a provider or cost is configured.
+        if not provider_id and (not (has_cost_param or has_metadata_cost) or estimated_cost_usd == 0):
             return PreflightDecision(allowed=True)
 
-        if provider_id and self._provider_repo is not None and estimated_cost_usd is None and not has_cost_param:
-            provider = self._provider_repo.get_by_id(provider_id)
-            if provider is not None and provider.provider_type == ProviderType.LOCAL_OLLAMA:
-                estimated_cost_usd = 0.0
+        provider = self._provider_repo.get_by_id(provider_id) if provider_id and self._provider_repo else None
+        if provider is not None and provider.provider_type == ProviderType.LOCAL_OLLAMA:
+            if estimated_cost_usd == 0 or not (has_cost_param or has_metadata_cost):
+                return PreflightDecision(allowed=True)
 
         operation = _STAGE_CAPABILITY_MAP.get(request.stage_id, ProviderCapability.TEXT_GENERATION)
-        attempt = int(request.params.get("attempt", 1) or 1)
-        stage_run_id = str(
-            request.params.get("stage_run_id") or f"{request.job_id}:{request.stage_id}"
-        )
-        request_key = str(
-            request.params.get("request_key")
-            or f"{request.job_id}:{request.stage_id}:{attempt}"
-        )
-
-        approved_keys = request.metadata.get("approved_request_keys") or []
-        explicit_approval = bool(
-            request.params.get("explicit_approval")
-            or request.metadata.get("explicit_approval")
-            or (request_key in approved_keys)
-        )
-        approved_cost_cap_usd = _parse_optional_float(request.params.get("approved_cost_cap_usd"))
-        max_retries = int(request.params.get("max_retries", self._default_max_retries))
-        is_retry = bool(request.params.get("is_retry", attempt > 1))
-        model = request.params.get("model")
+        stage_run_id = f"{request.job_id}:{request.stage_id}"
+        request_key = f"{stage_run_id}:{request.attempt}"
 
         preflight: SpendPreflightResult = self._budget_guard.preflight_and_reserve(
             SpendPreflightInput(
@@ -115,11 +100,10 @@ class BudgetPreflightAdapter(ExecutionPreflightPort):
                 provider_id=provider_id or "unconfigured-provider",
                 operation=operation,
                 estimated_cost_usd=estimated_cost_usd,
-                model=str(model) if model else None,
-                is_retry=is_retry,
-                max_retries=max_retries,
-                explicit_approval=explicit_approval,
-                approved_cost_cap_usd=approved_cost_cap_usd,
+                model=provider.selected_model if provider else None,
+                is_retry=request.attempt > 1,
+                max_retries=self._default_max_retries,
+                explicit_approval=request.confirmation_key == request_key,
             )
         )
 
@@ -135,6 +119,7 @@ class BudgetPreflightAdapter(ExecutionPreflightPort):
             allowed=False,
             reason=reason,
             requires_confirmation=preflight.requires_user_approval,
+            details=asdict(preflight),
         )
 
     def record_completion(

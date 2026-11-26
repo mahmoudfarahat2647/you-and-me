@@ -299,17 +299,65 @@ def test_workflow_engine_with_budget_preflight_adapter_pauses_before_submission(
     assert "pause_unknown_cost" in job.error
     assert "approve_and_submit" in job.error
 
-    # Now supply explicit approval and resume -> stage executes!
-    approved_job = engine.invalidate_stage(
-        __import__("src.core.dto.workflow_dto", fromlist=["InvalidateStageInput"]).InvalidateStageInput(
-            job_id=job.id,
-            stage_id="idea",
-            updated_params={"provider_id": "prov-1", "explicit_approval": True},
-        )
-    )
-    assert approved_job is not None
-    resumed = engine.resume(job.id)
+    # Confirm this specific request and resume.
+    resumed = engine.resume(job.id, confirmation_key=f"{job.id}:idea:1")
     assert executor.calls == ["idea"]
     idea_stage = resumed.get_stage("idea")
     assert idea_stage is not None
     assert idea_stage.status == StageStatus.COMPLETED
+
+
+@pytest.mark.parametrize(
+    ("stage_params", "expected_decision"),
+    [
+        ({"provider_id": "paid-provider", "explicit_approval": True}, "pause_unknown_cost"),
+        ({"provider_id": "paid-provider", "estimated_cost_usd": 2.0}, "pause_budget_exceeded"),
+    ],
+)
+async def test_default_workflow_preflight_pauses_and_requires_matching_confirmation(
+    tmp_path, stage_params, expected_decision,
+) -> None:
+    db_file = tmp_path / "workflow_budget.db"
+    executor = _RecordingStageExecutor()
+    app = create_app(db_path=str(db_file), stage_executor=executor)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        project = (await client.post("/api/projects", json={"name": "Spend review"})).json()
+        project_path = f"/api/projects/{project['id']}"
+        workflow_path = f"{project_path}/workflow"
+        settings = await client.patch(f"{project_path}/settings", json={
+            "stage_params": {"idea": stage_params},
+            "stage_modes": {"script": "manual"},
+        })
+        assert settings.status_code == 200
+        assert (await client.put(f"{project_path}/budget", json={"budget_limit_usd": 1})).status_code == 200
+        result = await client.post(f"{workflow_path}/run")
+        assert result.status_code == 200, result.text
+        blocked = result.json()["job"]
+        assert blocked["status"] == "paused"
+        assert blocked["budget_block"]["stage_id"] == "idea"
+        preflight = blocked["budget_block"]["preflight"]
+        assert preflight["decision"] == expected_decision
+        assert executor.calls == []
+        assert (await client.get(workflow_path)).json()["job"]["budget_block"] == blocked["budget_block"]
+        assert (await client.post(f"{workflow_path}/resume")).json()["job"]["budget_block"]
+        wrong_key = await client.post(f"{workflow_path}/resume", json={"approve_budget_request_key": "stale-key"})
+        assert wrong_key.status_code == 409
+        assert executor.calls == []
+
+        if expected_decision == "pause_unknown_cost":
+            approved = await client.post(f"{workflow_path}/resume", json={
+                "approve_budget_request_key": preflight["request_key"],
+            })
+            assert approved.status_code == 200, approved.text
+            assert approved.json()["job"]["budget_block"] is None
+            assert executor.calls == ["idea"]
+            ledger = (await client.get(f"{project_path}/spend")).json()
+            assert ledger["requests"][0]["explicitly_approved"] is True
+        else:
+            manual = await client.put(f"{workflow_path}/stages/idea/mode", json={"mode": "manual"})
+            assert manual.status_code == 200, manual.text
+            assert manual.json()["job"]["budget_block"] is None
+            supplied = await client.post(f"{workflow_path}/stages/idea/manual", json={"content": "A manual idea"})
+            assert supplied.status_code == 200, supplied.text
+            assert supplied.json()["job"]["stages"][0]["status"] == "completed"
+            assert executor.calls == []

@@ -281,7 +281,7 @@ class WorkflowEngine:
         """List all persisted workflow jobs for a project."""
         return self._repository.list_by_project(project_id)
 
-    def start_job(self, job_id: str) -> WorkflowJobResult:
+    def start_job(self, job_id: str, *, through_stage_id: Optional[str] = None) -> WorkflowJobResult:
         """Start or continue running an eligible pending/paused workflow job."""
         job = self._require_job(job_id)
         self._ensure_runnable_for_start(job)
@@ -292,9 +292,15 @@ class WorkflowEngine:
         job.status = JobStatus.RUNNING
         job.updated_at = _utc_now()
         self._repository.save(_job_to_dto(job))
-        return self._advance_job(job.id)
+        return self._advance_job(job.id, through_stage_id=through_stage_id)
 
-    def resume(self, job_id: str) -> WorkflowJobResult:
+    def resume(
+        self,
+        job_id: str,
+        *,
+        through_stage_id: Optional[str] = None,
+        confirmation_key: Optional[str] = None,
+    ) -> WorkflowJobResult:
         """Clear a pause and resume executing eligible/stale stages."""
         job = self._require_job(job_id)
         if job.cancel_requested or job.status == JobStatus.CANCELED:
@@ -307,10 +313,13 @@ class WorkflowEngine:
         job.validate_off_stages()
         job.pause_requested = False
         job.error = None
+        job.metadata.pop("preflight_block", None)
         job.status = JobStatus.RUNNING
         job.updated_at = _utc_now()
         self._repository.save(_job_to_dto(job))
-        return self._advance_job(job.id)
+        return self._advance_job(
+            job.id, through_stage_id=through_stage_id, confirmation_key=confirmation_key
+        )
 
     def pause(self, job_id: str) -> WorkflowJobResult:
         """Pause a job so no new stage submissions occur."""
@@ -723,7 +732,21 @@ class WorkflowEngine:
                 "Job has stages with unknown outcome and requires reconciliation."
             )
 
-    def _advance_job(self, job_id: str) -> WorkflowJobResult:
+    def _advance_job(
+        self,
+        job_id: str,
+        *,
+        through_stage_id: Optional[str] = None,
+        confirmation_key: Optional[str] = None,
+    ) -> WorkflowJobResult:
+        eligible_ids = None
+        if through_stage_id is not None:
+            job = self._require_job(job_id)
+            eligible_ids = {through_stage_id}
+            for stage_id in reversed(job.stage_order):
+                if stage_id in eligible_ids:
+                    eligible_ids.update(job.stages[stage_id].dependencies)
+
         while True:
             job = self._require_job(job_id)
             job.validate_off_stages()
@@ -744,19 +767,23 @@ class WorkflowEngine:
             if job.status == JobStatus.NEEDS_RECONCILIATION:
                 return _job_to_dto(job)
 
-            next_stage = self._pick_next_stage(job)
+            next_stage = self._pick_next_stage(job, eligible_ids)
             if next_stage is None:
                 self._refresh_non_running_job_status(job, now)
                 job.updated_at = now
                 self._repository.save(_job_to_dto(job))
                 return _job_to_dto(job)
 
-            should_continue = self._process_stage(job, next_stage)
+            should_continue = self._process_stage(job, next_stage, confirmation_key)
             if not should_continue:
                 return _job_to_dto(self._require_job(job_id))
 
-    def _pick_next_stage(self, job: WorkflowJob) -> Optional[StageState]:
+    def _pick_next_stage(
+        self, job: WorkflowJob, eligible_ids: Optional[set[str]] = None
+    ) -> Optional[StageState]:
         for stage_id in job.stage_order:
+            if eligible_ids is not None and stage_id not in eligible_ids:
+                continue
             stage = job.stages[stage_id]
             if stage.has_reusable_completion() or stage.status == StageStatus.SKIPPED:
                 continue
@@ -771,8 +798,11 @@ class WorkflowEngine:
                 return stage
         return None
 
-    def _process_stage(self, job: WorkflowJob, stage: StageState) -> bool:
+    def _process_stage(
+        self, job: WorkflowJob, stage: StageState, confirmation_key: Optional[str]
+    ) -> bool:
         now = _utc_now()
+        job.metadata.pop("preflight_block", None)
         if stage.mode == StageMode.OFF:
             stage.status = StageStatus.SKIPPED
             stage.updated_at = now
@@ -802,6 +832,8 @@ class WorkflowEngine:
                 artifact_type=stage.artifact_type,
                 params=copy.deepcopy(stage.params),
                 metadata=copy.deepcopy(job.metadata),
+                attempt=stage.attempt_count + 1,
+                confirmation_key=confirmation_key,
             )
         )
 
@@ -836,6 +868,11 @@ class WorkflowEngine:
                 )
                 latest_job.status = JobStatus.PAUSED
                 latest_job.error = reason
+                latest_job.metadata["preflight_block"] = {
+                    "stage_id": stage.stage_id,
+                    "details": preflight_decision.details,
+                    "reason": reason,
+                }
             else:
                 latest_stage.status = StageStatus.FAILED
                 latest_stage.error = reason
@@ -925,6 +962,7 @@ class WorkflowEngine:
             preserved_items=preserved_dtos,
             params=copy.deepcopy(stage.params),
             attempt=stage.attempt_count + 1,
+            item_inputs={item_id: copy.deepcopy(stage.items[item_id].input_data) for item_id in stale_ids},
         )
         return exec_input, preserved_entities
 
