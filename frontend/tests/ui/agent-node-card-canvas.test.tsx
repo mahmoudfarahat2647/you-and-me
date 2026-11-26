@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, expect, test, vi } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { expect, test, vi } from 'vitest'
 import { WorkflowCanvas } from '../../src/components/WorkflowCanvas'
 import type { Project, StageRuntimeState } from '../../src/types'
 
@@ -18,11 +18,7 @@ const stageStates: Partial<Record<'idea' | 'script' | 'voice' | 'scenes', StageR
   scenes: { status: 'pending', mode: 'off' },
 }
 
-afterEach(() => {
-  vi.useRealTimers()
-})
-
-function renderCanvas(selectedStage = 'idea', customStates?: Partial<Record<'idea' | 'script' | 'voice' | 'scenes', StageRuntimeState>>) {
+function renderCanvas(selectedStage = 'idea', customStates?: Partial<Record<'idea' | 'script' | 'voice' | 'scenes', StageRuntimeState>>, onRunStage = vi.fn()) {
   return render(
     <WorkflowCanvas
       project={project}
@@ -30,6 +26,7 @@ function renderCanvas(selectedStage = 'idea', customStates?: Partial<Record<'ide
       selectedStage={selectedStage}
       onSelectStage={() => {}}
       stageStates={customStates}
+      onRunStage={onRunStage}
     />
   )
 }
@@ -59,22 +56,16 @@ test('toggling Auto mode off disables that phase and updates its footer', () => 
   expect(within(scriptCard).getByRole('button', { name: 'Run node' })).toBeDisabled()
 })
 
-test('clicking Run node transitions a phase from Running to Completed', async () => {
-  vi.useFakeTimers()
-  renderCanvas('idea')
+test('clicking Run node delegates execution and waits for caller-supplied status', () => {
+  const onRunStage = vi.fn()
+  renderCanvas('idea', undefined, onRunStage)
 
   const ideaCard = screen.getByRole('group', { name: 'Idea' })
   fireEvent.click(within(ideaCard).getByRole('button', { name: 'Run node' }))
 
-  expect(within(ideaCard).getByRole('status')).toHaveTextContent('Running')
-  expect(within(ideaCard).getByRole('button', { name: 'Running…' })).toBeDisabled()
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(1500)
-  })
-
-  expect(within(ideaCard).getByRole('status')).toHaveTextContent('Completed')
-  expect(within(ideaCard).getByRole('button', { name: 'Run again' })).toBeEnabled()
+  expect(onRunStage).toHaveBeenCalledOnce()
+  expect(onRunStage).toHaveBeenCalledWith('idea')
+  expect(within(ideaCard).getByRole('status')).toHaveTextContent('Idle')
 })
 
 test('maps richer stage states to the four visual states and truthful labels', () => {

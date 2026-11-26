@@ -17,12 +17,16 @@ const STATUS_MAP: Record<StageRunStatus, { visual: NodeStatus; label: string }> 
   queued: { visual: 'idle', label: 'Queued' },
   running: { visual: 'running', label: 'Running' },
   in_progress: { visual: 'running', label: 'Running' },
+  waiting_manual: { visual: 'idle', label: 'Waiting manual' },
   awaiting_approval: { visual: 'idle', label: 'Awaiting approval' },
   completed: { visual: 'completed', label: 'Completed' },
   failed: { visual: 'error', label: 'Failed' },
   error: { visual: 'error', label: 'Error' },
   cancelled: { visual: 'idle', label: 'Cancelled' },
+  canceled: { visual: 'idle', label: 'Canceled' },
   skipped: { visual: 'idle', label: 'Skipped' },
+  stale: { visual: 'idle', label: 'Stale' },
+  unknown_outcome: { visual: 'idle', label: 'Unknown outcome' },
 };
 
 const MODE_LABEL: Record<StageExecutionMode, string> = {
@@ -32,8 +36,13 @@ const MODE_LABEL: Record<StageExecutionMode, string> = {
   off: 'Execution off',
 };
 
-/** Statuses where starting a node would contradict the engine state. */
-const RUN_BLOCKED_STATUSES: ReadonlySet<StageRunStatus> = new Set(['queued', 'awaiting_approval']);
+/** Statuses where starting a node directly would contradict the engine state. */
+const RUN_BLOCKED_STATUSES: ReadonlySet<StageRunStatus> = new Set([
+  'queued',
+  'waiting_manual',
+  'awaiting_approval',
+  'unknown_outcome',
+]);
 
 export const DEFAULT_STAGE_STATE: StageRuntimeState = { status: 'pending' };
 
@@ -43,7 +52,7 @@ export const DEFAULT_STAGE_STATE: StageRuntimeState = { status: 'pending' };
  */
 export function mapStageRuntimeState(state: StageRuntimeState = DEFAULT_STAGE_STATE): MappedStageState {
   const mode = state.mode ?? 'auto';
-  const mapped = STATUS_MAP[state.status];
+  const mapped = STATUS_MAP[state.status] ?? STATUS_MAP.pending;
   const isError = mapped.visual === 'error';
 
   return {

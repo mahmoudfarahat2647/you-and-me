@@ -9,6 +9,7 @@ class CreateProjectInput:
     name: str
     description: str = ""
     channel_profile_id: Optional[str] = None
+    preset_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class ProjectResult:
     created_at: str
     updated_at: str
     channel_profile_id: Optional[str] = None
+    preset_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
