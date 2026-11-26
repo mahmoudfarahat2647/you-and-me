@@ -10,6 +10,11 @@ import {
 import '@xyflow/react/dist/style.css';
 import {
   Play,
+  Pause,
+  Square,
+  RotateCcw,
+  RefreshCw,
+  AlertTriangle,
   MoreHorizontal,
   MousePointer,
   Hand,
@@ -31,6 +36,7 @@ import type {
   StageRuntimeState,
 } from '../types';
 import type { ProjectMediaController } from '../hooks/useProjectMedia';
+import type { ProjectWorkflowController } from '../hooks/useProjectWorkflow';
 import { WORKFLOW_STAGES } from '../lib/workflow/stages';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -62,6 +68,7 @@ interface WorkflowCanvasProps {
   activeTab?: WorkspaceTab;
   onTabChange?: (tab: WorkspaceTab) => void;
   mediaController?: ProjectMediaController;
+  workflowController?: ProjectWorkflowController;
 }
 
 const nodeTypes = {
@@ -246,6 +253,7 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   activeTab: controlledActiveTab,
   onTabChange,
   mediaController,
+  workflowController,
 }) => {
   const [localActiveTab, setLocalActiveTab] = useState<WorkspaceTab>('workflow');
   const activeTab = controlledActiveTab ?? localActiveTab;
@@ -441,6 +449,35 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     projectAssets.length +
     (mediaController ? mediaController.clips.length + (mediaController.audio ? 1 : 0) : 0);
 
+  const wfJob = workflowController?.job ?? null;
+  const wfBusy = isRunningWorkflow || Boolean(workflowController?.isSubmitting);
+  const wfRunning = wfJob?.status === 'running' || wfBusy;
+  const wfPaused = wfJob?.status === 'paused';
+  const wfNeedsReconcile = wfJob?.status === 'needs_reconciliation';
+  const wfCanCancel =
+    wfJob !== null &&
+    (wfJob.status === 'running' ||
+      wfJob.status === 'paused' ||
+      wfJob.status === 'pending' ||
+      wfJob.status === 'needs_reconciliation');
+
+  const combinedLogs = [
+    ...(workflowController?.logs ?? []).map((entry) => ({
+      id: `wf-${entry.id}`,
+      timestamp: entry.created_at,
+      stage: entry.stage_id,
+      level: entry.level,
+      message: entry.message,
+    })),
+    ...(mediaController?.logs ?? []).map((entry) => ({
+      id: `media-${entry.id}`,
+      timestamp: entry.timestamp,
+      stage: entry.stage,
+      level: entry.level,
+      message: entry.message,
+    })),
+  ];
+
   return (
     <div className="flex-1 flex flex-col bg-[#191919] select-none min-w-0 overflow-hidden">
       {/* Top Header Bar */}
@@ -463,8 +500,8 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           <span className="text-neutral-300 font-medium truncate">{project.name}</span>
         </div>
 
-        {/* Project Title and Run Button */}
-        <div className="mt-2 flex items-center justify-between pb-3">
+        {/* Project Title and Run Controls */}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 pb-3">
           <div className="flex min-w-0 items-center gap-3">
             <h1 className="text-base font-bold text-neutral-100 truncate">
               {project.name}
@@ -474,21 +511,111 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
                 {projectSettings.language} · {projectSettings.video_format} · ${projectSettings.budget_limit_usd.toFixed(2)}
               </span>
             )}
+            {wfJob && (
+              <span
+                aria-label="Workflow status"
+                className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium capitalize ${
+                  wfJob.status === 'completed'
+                    ? 'border-emerald-500/30 bg-emerald-950/30 text-emerald-300'
+                    : wfJob.status === 'failed' || wfJob.status === 'needs_reconciliation'
+                    ? 'border-rose-500/30 bg-rose-950/30 text-rose-300'
+                    : wfJob.status === 'running'
+                    ? 'border-blue-500/30 bg-blue-950/30 text-blue-300'
+                    : 'border-[#2e2e2e] bg-[#202020] text-neutral-300'
+                }`}
+              >
+                {wfJob.status.replace('_', ' ')}
+              </span>
+            )}
             <Button aria-label="Project options" variant="ghost" size="icon" className="text-neutral-400 shrink-0">
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </div>
 
-          <Button
-            variant="workflow"
-            className="gap-2"
-            disabled={isRunningWorkflow}
-            onClick={() => void handleRunWorkflow()}
-          >
-            <Play className="h-3 w-3 fill-emerald-400" />
-            <span>{isRunningWorkflow ? 'Running…' : 'Run Workflow'}</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            {workflowController && wfJob?.status === 'running' && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={wfBusy}
+                onClick={() => void workflowController.pause()}
+                className="gap-1.5"
+              >
+                <Pause className="h-3 w-3" />
+                <span>Pause</span>
+              </Button>
+            )}
+            {workflowController && wfCanCancel && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={wfBusy}
+                onClick={() => void workflowController.cancel()}
+                className="gap-1.5"
+              >
+                <Square className="h-3 w-3" />
+                <span>Cancel</span>
+              </Button>
+            )}
+            {workflowController && (wfNeedsReconcile || wfJob !== null) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={wfBusy}
+                onClick={() => void workflowController.reconcile()}
+                className="gap-1.5"
+              >
+                <RefreshCw className="h-3 w-3" />
+                <span>Reconcile</span>
+              </Button>
+            )}
+            {workflowController && wfPaused ? (
+              <Button
+                type="button"
+                variant="workflow"
+                className="gap-2"
+                disabled={wfBusy}
+                onClick={() => void workflowController.resume()}
+              >
+                <RotateCcw className="h-3 w-3 text-emerald-400" />
+                <span>{wfBusy ? 'Resuming…' : 'Resume Workflow'}</span>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="workflow"
+                className="gap-2"
+                disabled={wfRunning || wfNeedsReconcile}
+                onClick={() => void handleRunWorkflow()}
+              >
+                <Play className="h-3 w-3 fill-emerald-400" />
+                <span>{wfRunning ? 'Running…' : 'Run Workflow'}</span>
+              </Button>
+            )}
+          </div>
         </div>
+
+        {workflowController?.workflowError && (
+          <div
+            role="alert"
+            className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-rose-500/40 bg-rose-950/30 px-3 py-2 text-xs text-rose-200"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+              <span className="break-words">{workflowController.workflowError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={workflowController.clearError}
+              className="text-[11px] text-rose-300 hover:text-rose-100 shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Header Tabs */}
         <div className="flex items-center gap-6 text-xs border-t border-[#252525]">
@@ -743,14 +870,16 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       {activeTab === 'logs' && (
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-4xl mx-auto rounded-xl border border-[#2e2e2e] bg-[#202020] p-4 font-mono text-xs">
-            {mediaController && mediaController.logs.length > 0 ? (
+            {combinedLogs.length > 0 ? (
               <ul className="space-y-2">
-                {mediaController.logs.map((entry) => (
+                {combinedLogs.map((entry) => (
                   <li
                     key={entry.id}
                     className={`flex items-start gap-3 rounded-lg border px-3 py-2 ${
                       entry.level === 'error'
                         ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                        : entry.level === 'warning'
+                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
                         : 'border-[#2e2e2e] bg-[#191919] text-neutral-300'
                     }`}
                   >

@@ -141,12 +141,16 @@ export type StageRunStatus =
   | 'queued'
   | 'running'
   | 'in_progress'
+  | 'waiting_manual'
   | 'awaiting_approval'
   | 'completed'
   | 'failed'
   | 'error'
   | 'cancelled'
-  | 'skipped';
+  | 'canceled'
+  | 'skipped'
+  | 'stale'
+  | 'unknown_outcome';
 
 /** How each node may be executed. Independent of its current status. */
 export type StageExecutionMode = 'auto' | 'manual' | 'approval' | 'off';
@@ -158,6 +162,89 @@ export interface StageRuntimeState {
   footer?: string;
   /** Only shown by the card when the mapped visual status is "error". */
   errorMessage?: string;
+}
+
+export type WorkflowJobStatus =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'canceled'
+  | 'needs_reconciliation';
+
+export interface WorkflowArtifact {
+  artifact_id: string;
+  stage_id: string;
+  artifact_type: string;
+  uri?: string | null;
+  data: Record<string, unknown>;
+  schema_version: string;
+  compatible: boolean;
+  stale: boolean;
+  created_at?: string | null;
+  content_hash?: string | null;
+}
+
+export interface WorkflowSceneItem {
+  item_id: string;
+  status: StageRunStatus;
+  artifact?: WorkflowArtifact | null;
+  input_data: Record<string, unknown>;
+  error?: string | null;
+}
+
+export interface WorkflowStageState {
+  stage_id: StageId;
+  mode: StageExecutionMode;
+  status: StageRunStatus;
+  dependencies: string[];
+  required: boolean;
+  artifact_type: string;
+  artifact?: WorkflowArtifact | null;
+  items: WorkflowSceneItem[];
+  params: Record<string, unknown>;
+  external_run_id?: string | null;
+  error?: string | null;
+  attempt_count: number;
+  started_at?: string | null;
+  completed_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface WorkflowJob {
+  id: string;
+  project_id: string;
+  status: WorkflowJobStatus;
+  stage_order: StageId[];
+  stages: WorkflowStageState[];
+  created_at: string;
+  updated_at: string;
+  pause_requested: boolean;
+  cancel_requested: boolean;
+  completed_at?: string | null;
+  error?: string | null;
+}
+
+export interface WorkflowLogEntry {
+  id: string;
+  job_id: string;
+  project_id: string;
+  stage_id: string;
+  level: 'info' | 'warning' | 'error';
+  message: string;
+  created_at: string;
+}
+
+export interface WorkflowStateResponse {
+  project_id: string;
+  job: WorkflowJob | null;
+  logs: WorkflowLogEntry[];
+}
+
+export interface ReconcileWorkflowResponse extends WorkflowStateResponse {
+  reconciled_job_ids: string[];
+  needs_reconciliation_job_ids: string[];
 }
 
 export type MediaItemKind = 'clip' | 'audio';

@@ -957,12 +957,14 @@ class WorkflowEngine:
         if result.status == "failed":
             stage.status = StageStatus.FAILED
             stage.error = result.error or "Stage execution failed."
+            job.status = JobStatus.FAILED
             job.error = stage.error
             return
 
         if result.status != "completed":
             stage.status = StageStatus.FAILED
             stage.error = f"Unsupported executor result status '{result.status}'."
+            job.status = JobStatus.FAILED
             job.error = stage.error
             return
 

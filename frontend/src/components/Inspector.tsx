@@ -17,6 +17,7 @@ import {
 } from '../lib/workflow/stages';
 import { formatFileSize, formatMediaDuration } from '../lib/media/mediaStageState';
 import type { ProjectMediaController } from '../hooks/useProjectMedia';
+import type { ProjectWorkflowController } from '../hooks/useProjectWorkflow';
 import type {
   Project,
   ProjectAsset,
@@ -38,6 +39,7 @@ interface InspectorProps {
   onUpdateSettings?: (patch: UpdateProjectSettingsPayload) => void;
   projectAssets?: readonly ProjectAsset[];
   mediaController?: ProjectMediaController;
+  workflowController?: ProjectWorkflowController;
   onOpenMediaTab?: (tab: 'assets' | 'output') => void;
 }
 
@@ -71,6 +73,7 @@ export const Inspector: React.FC<InspectorProps> = ({
   onUpdateSettings,
   projectAssets = [],
   mediaController,
+  workflowController,
   onOpenMediaTab,
 }) => {
   const [activeTab, setActiveTab] = useState<'settings' | 'output' | 'logs'>('settings');
@@ -81,6 +84,11 @@ export const Inspector: React.FC<InspectorProps> = ({
   const [localTone, setLocalTone] = useState('Educational Arabic with historical narrative');
   const [localTemperature, setLocalTemperature] = useState(0.7);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [manualContent, setManualContent] = useState('');
+  const [manualUri, setManualUri] = useState('');
+  const [approvalDraft, setApprovalDraft] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [sceneEdits, setSceneEdits] = useState<Record<string, string>>({});
 
   const providerId = useId();
   const modelId = useId();

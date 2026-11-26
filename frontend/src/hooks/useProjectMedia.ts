@@ -42,6 +42,7 @@ export interface ProjectMediaController {
   moveClip: (clipId: string, direction: 'up' | 'down') => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
   triggerExport: () => Promise<ExportMp4Result | null>;
+  refresh: () => Promise<void>;
   clearErrors: () => void;
 }
 
@@ -266,6 +267,18 @@ export function useProjectMedia(projectId: string | undefined): ProjectMediaCont
     }
   }, [projectId, appendLog]);
 
+  const refresh = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const bundle = await getProjectMedia(projectId);
+      setClips(bundle.clips);
+      setAudio(bundle.audio);
+      setLatestExport(bundle.latest_export);
+    } catch {
+      // keep existing state when refresh is unavailable
+    }
+  }, [projectId]);
+
   const clearErrors = useCallback(() => {
     setVoiceError(null);
     setScenesError(null);
@@ -312,6 +325,7 @@ export function useProjectMedia(projectId: string | undefined): ProjectMediaCont
     moveClip,
     removeItem,
     triggerExport,
+    refresh,
     clearErrors,
   };
 }
